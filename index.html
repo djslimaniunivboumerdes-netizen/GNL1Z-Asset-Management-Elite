@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+  name="viewport"
+  content="width=device-width, initial-scale=1, viewport-fit=cover"
+/>
+    <title>GNL1Z Asset Management — Sonatrach Arzew</title>
+    <meta name="description" content="Industrial Asset Management for the GNL1Z Sonatrach AP-C3MR™ liquefaction facility. Equipment master, spare parts, DCS directory, and operational manuals.">
+    <meta name="author" content="Slimani Djamel" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="apple-touch-icon" sizes="180x180"    href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="GNL1Z" />
+    <meta name="theme-color" content="#f59e0b" />
+    <meta name="application-name" content="GNL1Z" />
+
+    <meta property="og:type" content="website" />
+    
+  
+  
+  
+  <meta property="og:image" content="/sonatrach-logo.png">
+  <meta name="twitter:image" content="/sonatrach-logo.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta property="og:title" content="GNL1Z Asset Management — Sonatrach Arzew">
+  <meta name="twitter:title" content="GNL1Z Asset Management — Sonatrach Arzew">
+  <meta property="og:description" content="Industrial Asset Management for the GNL1Z Sonatrach AP-C3MR™ liquefaction facility. Equipment master, spare parts, DCS directory, and operational manuals.">
+  <meta name="twitter:description" content="Industrial Asset Management for the GNL1Z Sonatrach AP-C3MR™ liquefaction facility. Equipment master, spare parts, DCS directory, and operational manuals.">
+</head>
+<script>
+  window.addEventListener('error', function(e) {
+    document.body.innerHTML = '<div style="font-family:monospace;padding:20px;color:#ef4444;background:#0f172a;white-space:pre-wrap;word-break:break-all;">' +
+      '<h2>Runtime Error</h2>' +
+      '<p><b>Message:</b> ' + e.message + '</p>' +
+      '<p><b>File:</b> ' + (e.filename || 'unknown') + '</p>' +
+      '<p><b>Line:</b> ' + (e.lineno || '?') + '</p>' +
+      '<hr style="border-color:#334155;margin:15px 0;">' +
+      '<p><b>Stack:</b></p>' + (e.error?.stack || 'N/A') +
+      '</div>';
+  });
+</script>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  <script>
+    // Manifest-only PWA: no service worker. Unregister any previously
+    // installed SW so devices stop serving stale cached builds.
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.getRegistrations().then((regs) => {
+        regs.forEach((r) => r.unregister());
+      }).catch(() => {});
+    }
+  </script>
+  </body>
+</html>

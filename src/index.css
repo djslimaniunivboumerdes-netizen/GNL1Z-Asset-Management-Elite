@@ -1,0 +1,170 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* GNL1Z Industrial Asset Management - Design System
+   All colors HSL. Industrial palette: Navy, Slate, Safety Orange. */
+/* Fix floating calendar */
+.PopoverContent {
+  z-index: 1000 !important;
+}
+@layer base {
+  :root {
+    /* Light - engineering report */
+    --background: 210 20% 97%;
+    --foreground: 217 40% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 217 40% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 217 40% 12%;
+
+    /* Navy primary */
+    --primary: 217 60% 18%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 217 70% 32%;
+
+    /* Slate secondary */
+    --secondary: 215 20% 92%;
+    --secondary-foreground: 217 40% 18%;
+
+    --muted: 215 18% 94%;
+    --muted-foreground: 215 16% 42%;
+
+    /* Safety orange */
+    --accent: 18 95% 52%;
+    --accent-foreground: 0 0% 100%;
+    --accent-glow: 25 100% 60%;
+
+    --destructive: 0 78% 48%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 60% 38%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 42 95% 50%;
+    --warning-foreground: 217 40% 12%;
+
+    --border: 215 20% 86%;
+    --input: 215 20% 88%;
+    --ring: 18 95% 52%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 217 50% 14%;
+    --sidebar-foreground: 215 20% 88%;
+    --sidebar-primary: 18 95% 52%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 217 45% 20%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 217 45% 22%;
+    --sidebar-ring: 18 95% 52%;
+
+    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--primary-glow)) 100%);
+    --gradient-accent: linear-gradient(135deg, hsl(var(--accent)) 0%, hsl(var(--accent-glow)) 100%);
+    --gradient-industrial: linear-gradient(135deg, hsl(217 60% 18%) 0%, hsl(217 45% 24%) 50%, hsl(215 30% 30%) 100%);
+    --shadow-industrial: 0 10px 30px -10px hsl(217 60% 18% / 0.35);
+    --shadow-accent: 0 8px 24px -6px hsl(18 95% 52% / 0.4);
+    --shadow-card: 0 1px 3px hsl(217 30% 15% / 0.08), 0 4px 12px hsl(217 30% 15% / 0.06);
+
+    --font-display: 'Space Grotesk', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+    --font-body: 'Inter', system-ui, sans-serif;
+  }
+
+  .dark {
+    --background: 217 40% 8%;
+    --foreground: 210 25% 92%;
+
+    --card: 217 38% 11%;
+    --card-foreground: 210 25% 92%;
+
+    --popover: 217 38% 11%;
+    --popover-foreground: 210 25% 92%;
+
+    --primary: 18 95% 55%;
+    --primary-foreground: 217 40% 8%;
+    --primary-glow: 25 100% 62%;
+
+    --secondary: 217 32% 16%;
+    --secondary-foreground: 210 25% 92%;
+
+    --muted: 217 30% 14%;
+    --muted-foreground: 215 16% 62%;
+
+    --accent: 18 95% 55%;
+    --accent-foreground: 217 40% 8%;
+    --accent-glow: 25 100% 62%;
+
+    --destructive: 0 75% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 55% 48%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 42 95% 55%;
+    --warning-foreground: 217 40% 8%;
+
+    --border: 217 28% 20%;
+    --input: 217 28% 18%;
+    --ring: 18 95% 55%;
+
+    --sidebar-background: 217 45% 6%;
+    --sidebar-foreground: 215 20% 80%;
+    --sidebar-primary: 18 95% 55%;
+    --sidebar-primary-foreground: 217 40% 8%;
+    --sidebar-accent: 217 38% 12%;
+    --sidebar-accent-foreground: 210 25% 92%;
+    --sidebar-border: 217 32% 14%;
+    --sidebar-ring: 18 95% 55%;
+
+    --gradient-industrial: linear-gradient(135deg, hsl(217 50% 10%) 0%, hsl(217 38% 14%) 50%, hsl(215 25% 18%) 100%);
+    --shadow-industrial: 0 10px 30px -10px hsl(0 0% 0% / 0.6);
+    --shadow-accent: 0 8px 24px -6px hsl(18 95% 55% / 0.5);
+    --shadow-card: 0 1px 3px hsl(0 0% 0% / 0.3), 0 4px 12px hsl(0 0% 0% / 0.25);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    font-family: var(--font-body);
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    @apply tracking-tight;
+  }
+
+  .font-mono, code, pre {
+    font-family: var(--font-mono);
+  }
+}
+
+@layer components {
+  .industrial-grid {
+    background-image:
+      linear-gradient(hsl(var(--border) / 0.4) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(var(--border) / 0.4) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+
+  .stripe-warning {
+    background-image: repeating-linear-gradient(
+      45deg,
+      hsl(var(--accent)) 0,
+      hsl(var(--accent)) 10px,
+      hsl(217 40% 12%) 10px,
+      hsl(217 40% 12%) 20px
+    );
+  }
+}

@@ -1,0 +1,7 @@
+project_id = "usaagqmwdnzgutmpuorz"
+
+[functions.detect-dcs-instruments]
+verify_jwt = false
+
+[functions.news-feed]
+verify_jwt = false

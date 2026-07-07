@@ -1,0 +1,38 @@
+{
+  "id": "/",
+  "name": "GNL1Z Asset Integrity Management",
+  "short_name": "GNL1Z",
+  "description": "Industrial Asset Management for the GNL1Z Sonatrach AP-C3MR™ liquefaction facility.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#0f172a",
+  "lang": "en",
+  "categories": ["business", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ],
+  "shortcuts": [
+    { "name": "Equipment", "url": "/equipment" },
+    { "name": "Process Flow", "url": "/flow" },
+    { "name": "News", "url": "/news" }
+  ]
+}
