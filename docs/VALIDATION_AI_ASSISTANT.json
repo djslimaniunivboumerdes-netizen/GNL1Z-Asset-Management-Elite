@@ -1,0 +1,31 @@
+{
+  "date": "2026-10-29",
+  "scope": "Expert AI GNL1 enhancement, isolated preview only",
+  "commands": {
+    "npm run check": "passed: typecheck, ESLint 0 errors / 10 existing warnings, Vitest 13 files / 71 tests",
+    "npm run build": "passed: main JS 676.08 kB / 206.29 kB gzip; PWA 100 entries / 3776.24 KiB",
+    "preview": "http://localhost:8081 (0.0.0.0), dev/preview API bridge enabled"
+  },
+  "apiSmoke": {
+    "sameOriginReference": 200,
+    "crossOrigin": 403,
+    "frenchReference": 200,
+    "explicitTagPrecision": { "sources": 1, "includesNeighborTag": false }
+  },
+  "browserChecks": [
+    { "name": "assistant launcher present", "ok": true },
+    { "name": "dialog opens with honest subtitle", "ok": true },
+    { "name": "reference answer renders", "ok": true },
+    { "name": "source card links to equipment", "ok": true },
+    { "name": "no fake cache-hit badge", "ok": true },
+    { "name": "equipment-aware deep link answers", "ok": true },
+    { "name": "clear session restores welcome", "ok": true },
+    { "name": "mobile panel fits viewport", "ok": true, "detail": "358x680 @ 16,68 on 390x844" },
+    { "name": "no page errors", "ok": true }
+  ],
+  "notValidated": [
+    "Real Gemini provider credentials, cost, latency, or output quality",
+    "Cloudflare Pages deployment and durable/global rate limiting",
+    "Live Supabase data or operational records"
+  ]
+}

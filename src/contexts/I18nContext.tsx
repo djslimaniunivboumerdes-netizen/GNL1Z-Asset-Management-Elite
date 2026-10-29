@@ -104,9 +104,9 @@ const DICT: Dict = {
   collapse: { en: "Collapse", fr: "Réduire" },
 
   /* ─── AI ASSISTANT KEYS ─── */
-  aiAssistant: { en: "GNL1Z AI Expert", fr: "Expert IA GNL1Z" },
-  aiSubtitle: { en: "Industrial Asset Knowledgebase & Prediction Engine", fr: "Base de Connaissances & Moteur de Prédiction" },
-  askAiPlaceholder: { en: "Ask about equipment, tests, failure predictions, tools...", fr: "Poser une question sur l'équipement, les essais, pannes, outils..." },
+  aiAssistant: { en: "Expert AI GNL1", fr: "Expert AI GNL1" },
+  aiSubtitle: { en: "Asset register reference · simulated alarms only", fr: "Référence du registre des actifs · alarmes simulées uniquement" },
+  askAiPlaceholder: { en: "Ask about an equipment tag, schedule, alarm, DCS panel, or manual...", fr: "Posez une question sur un repère, une échéance, une alarme, un panneau DCS ou un manuel..." },
   predictChip: { en: "Review schedule for X01-E-501", fr: "Consulter l'échéance de X01-E-501" },
   suggestToolsChip: { en: "Reference tools for X01-E-501", fr: "Outils de référence pour X01-E-501" },
   analyzeAlertsChip: { en: "Show simulated alarms", fr: "Afficher les alarmes simulées" },

@@ -32,6 +32,19 @@ The final production preview was reviewed with mocked Supabase REST/auth/storage
 
 Earlier isolated workflow reviews also covered search, filters, pagination, CSV, schedule/alert fixtures, assistant fit, auth/news/about fit, unknown equipment, and unavailable-register honesty. See `docs/ENHANCEMENTS.md` for the enhancement summary and `docs/PRODUCTION_READINESS.md` for work that still requires live staging and engineering approval.
 
+## Expert AI GNL1 follow-up validation
+
+Date: 2026-10-29. The assistant enhancement was validated separately on the production preview with the dev/preview API bridge and no provider key.
+
+| Check | Result |
+|---|---|
+| `npm run check` | Passed; ESLint 0 errors / 10 existing warnings; Vitest 13 files / 71 tests |
+| `npm run build` | Passed; main JS 676.08 kB / 206.29 kB gzip; PWA 100 entries / 3,776.24 KiB |
+| API smoke | Same-origin reference 200, cross-origin 403, French reference 200, explicit-tag precision returns one equipment source |
+| Browser smoke | 9/9 checks passed: launcher, honest subtitle, reference answer, source link, no fake cache badge, equipment-aware deep link, confirmed clear, mobile fit, no page errors |
+
+Machine-readable results are in `docs/VALIDATION_AI_ASSISTANT.json`. See `docs/AI_ASSISTANT.md` for the assistant contract and boundaries.
+
 ## Not validated
 
 - Live Supabase auth/RLS/storage against an active project.

@@ -1,10 +1,11 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "./AppSidebar";
 import { AppHeader } from "./AppHeader";
-import { AiAgentChat } from "@/components/AiAgentChat";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+
+const AiAgentChat = lazy(() => import("@/components/AiAgentChat").then((module) => ({ default: module.AiAgentChat })));
 
 export default function AppLayout() {
   const { pathname } = useLocation();
@@ -22,7 +23,7 @@ export default function AppLayout() {
           <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 pb-20 outline-none md:pb-0">
             <ErrorBoundary key={pathname}><Outlet /></ErrorBoundary>
           </main>
-          <AiAgentChat />
+          <Suspense fallback={null}><AiAgentChat /></Suspense>
         </div>
       </div>
     </SidebarProvider>

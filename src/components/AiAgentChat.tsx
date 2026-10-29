@@ -1,273 +1,400 @@
-import { useState, useRef, useEffect } from "react";
-import { MarkdownText } from "@/components/MarkdownText";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
+import { AlertTriangle, ArrowDown, BookOpen, Check, Copy, Cpu, ExternalLink, Loader2, MessageSquare, RotateCcw, Send, ShieldCheck, Sparkles, Square, Trash2, X } from "lucide-react";
+import { toast } from "sonner";
 import { useI18n } from "@/contexts/I18nContext";
-import { Bot, X, Send, Sparkles, RefreshCw, AlertTriangle, Hammer, ShieldAlert, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { EQUIPMENT } from "@/data";
-import { DCS_PANELS } from "@/data/dcs_panels";
-import { MANUALS } from "@/data/manuals";
-import { getActiveAlarms, subscribeAlarms } from "@/lib/alarmStore";
+import { MarkdownText } from "@/components/MarkdownText";
+import {
+  ASSISTANT_MAX_PROMPT,
+  ASSISTANT_NAME,
+  assistantHistory,
+  buildAssistantContext,
+  clearAssistantSession,
+  followUpPrompts,
+  loadAssistantSession,
+  saveAssistantSession,
+  selectRelevantEquipment,
+  type AssistantMessage,
+  type AssistantMode,
+  type AssistantSource,
+} from "@/lib/assistant";
 
-interface Message {
-  id: string;
-  sender: "user" | "ai";
-  text: string;
-  cached?: boolean;
-  hitCount?: number;
+const REQUEST_TIMEOUT_MS = 25_000;
+const newId = () => typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+function modeLabel(mode: AssistantMode | undefined, lang: "en" | "fr"): string {
+  if (mode === "ai") return lang === "fr" ? "Assisté par IA" : "AI-assisted";
+  if (mode === "cache") return lang === "fr" ? "Réponse en cache" : "Cached answer";
+  return lang === "fr" ? "Référence statique" : "Static reference";
+}
+
+function SourceCards({ sources, lang, onNavigate }: { sources: AssistantSource[]; lang: "en" | "fr"; onNavigate: () => void }) {
+  if (!sources.length) return null;
+  const icon = (kind: AssistantSource["kind"]) => kind === "manual" ? <BookOpen className="h-3.5 w-3.5" /> : kind === "simulation" ? <AlertTriangle className="h-3.5 w-3.5" /> : kind === "dcs" ? <Cpu className="h-3.5 w-3.5" /> : <ShieldCheck className="h-3.5 w-3.5" />;
+  return (
+    <div className="mt-3 space-y-1.5">
+      <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">{lang === "fr" ? "Références fournies" : "Supplied references"}</p>
+      <div className="flex flex-wrap gap-1.5">
+        {sources.map((source) => {
+          const content = <>{icon(source.kind)}<span className="max-w-[220px] truncate">{source.title}</span>{source.href ? <ExternalLink className="h-3 w-3 opacity-60" /> : null}</>;
+          const className = "inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/25 bg-cyan-500/5 px-2 py-1 text-[11px] font-mono text-cyan-700 transition-colors hover:border-cyan-500/50 hover:bg-cyan-500/10 dark:text-cyan-300";
+          return source.href
+            ? <Link key={`${source.kind}-${source.id}`} to={source.href} onClick={onNavigate} className={className} title={source.detail ?? source.title}>{content}</Link>
+            : <span key={`${source.kind}-${source.id}`} className={className} title={source.detail ?? source.title}>{content}</span>;
+        })}
+      </div>
+    </div>
+  );
 }
 
 export function AiAgentChat() {
-  const [isOpen, setIsOpen] = useState(false);
-  useEffect(() => {
-    if (!isOpen) return;
-    const close = (event: KeyboardEvent) => { if (event.key === "Escape") setIsOpen(false); };
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
-  }, [isOpen]);
-  const { t, lang } = useI18n();
-  
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      sender: "ai",
-      text: lang === "fr"
-        ? "Bonjour. Je peux consulter les données statiques du registre GNL1Z et les alarmes simulées affichées. Je ne dispose pas de télémétrie temps réel et je ne remplace pas les procédures approuvées, un plan d'essai ou un plan de levage. Posez une question sur un repère équipement."
-        : "Hello. I can look up static GNL1Z register data and the simulated alarms shown on screen. I do not have real-time telemetry and I do not replace approved procedures, a test plan, or a lift plan. Ask about an equipment tag."
-    }
-  ]);
+  const { lang, t } = useI18n();
+  const location = useLocation();
+  const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState<AssistantMessage[]>(() => loadAssistantSession());
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [liveAlarms, setLiveAlarms] = useState(getActiveAlarms());
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [contextTag, setContextTag] = useState<string | null>(null);
+  const [followUps, setFollowUps] = useState<string[]>([]);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [showJump, setShowJump] = useState(false);
+
+  const controllerRef = useRef<AbortController | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const messagesRef = useRef(messages);
+  const busyRef = useRef(false);
+  const listRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const launcherRef = useRef<HTMLButtonElement>(null);
+  const sendRef = useRef<(prompt: string, options?: { retryId?: string; equipmentTag?: string | null }) => void>(() => {});
+  const fr = lang === "fr";
+  const L = useCallback((en: string, french: string) => fr ? french : en, [fr]);
+
+  useEffect(() => { messagesRef.current = messages; saveAssistantSession(messages); }, [messages]);
+  useEffect(() => { busyRef.current = busy; }, [busy]);
+  useEffect(() => {
+    const match = location.pathname.match(/^\/equipment\/([^/]+)/);
+    setContextTag(match ? decodeURIComponent(match[1]) : null);
+  }, [location.pathname]);
+  useEffect(() => () => { controllerRef.current?.abort(); if (timeoutRef.current) clearTimeout(timeoutRef.current); }, []);
+
+  const scrollToLatest = useCallback((behavior: ScrollBehavior = "smooth") => {
+    const el = listRef.current;
+    if (el) {
+      if (typeof el.scrollTo === "function") el.scrollTo({ top: el.scrollHeight, behavior });
+      else el.scrollTop = el.scrollHeight;
+    }
+    setShowJump(false);
+  }, []);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
-  }, [messages, loading, isOpen]);
+    const el = listRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (nearBottom || busy) scrollToLatest();
+    else setShowJump(true);
+  }, [messages, busy, scrollToLatest]);
 
-  // 🚀 Live simulated Safety Alarm feed (from Smart Process Flow) — kept in sync
-  // so the AI Agent can answer "any active alarms?" with the real screen state.
-  useEffect(() => subscribeAlarms(() => setLiveAlarms(getActiveAlarms())), []);
-
-  // 🚀 Cross-page deep-link: Smart Process Flow's "Ask AI Expert" button dispatches
-  // this event with a pre-filled prompt; open the chat and send it automatically.
   useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ prompt: string }>).detail;
+    if (!open) return;
+    const timer = setTimeout(() => { inputRef.current?.focus(); scrollToLatest("auto"); }, 60);
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { setOpen(false); launcherRef.current?.focus(); } };
+    window.addEventListener("keydown", onKey);
+    return () => { clearTimeout(timer); window.removeEventListener("keydown", onKey); };
+  }, [open, scrollToLatest]);
+
+  const send = useCallback(async (raw: string, options?: { retryId?: string; equipmentTag?: string | null }) => {
+    const prompt = raw.trim().slice(0, ASSISTANT_MAX_PROMPT);
+    if (!prompt || busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setFollowUps([]);
+    const now = new Date().toISOString();
+    const assistantId = options?.retryId ?? newId();
+    const pending: AssistantMessage = { id: assistantId, role: "assistant", text: "", createdAt: now, status: "loading", prompt };
+    if (options?.retryId) {
+      setMessages((prev) => prev.map((message) => message.id === options.retryId ? { ...message, text: "", status: "loading", prompt, createdAt: now } : message));
+    } else {
+      const user: AssistantMessage = { id: newId(), role: "user", text: prompt, createdAt: now, status: "complete" };
+      setMessages((prev) => [...prev, user, pending].slice(-40));
+    }
+    setInput("");
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    timeoutRef.current = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const started = performance.now();
+    try {
+      const [{ EQUIPMENT }, { DCS_PANELS }, { MANUALS }, { getActiveAlarms }] = await Promise.all([
+        import("@/data"), import("@/data/dcs_panels"), import("@/data/manuals"), import("@/lib/alarmStore"),
+      ]);
+      const explicitTag = options?.equipmentTag ?? contextTag;
+      const matched = selectRelevantEquipment(prompt, EQUIPMENT, explicitTag);
+      const tag = explicitTag ?? matched[0]?.tag ?? null;
+      const contextData = buildAssistantContext({ prompt, lang, equipment: EQUIPMENT, panels: DCS_PANELS, manuals: MANUALS, alarms: getActiveAlarms(), currentTag: tag });
+      const history = assistantHistory(messagesRef.current.filter((message) => message.id !== assistantId), 6);
+      const response = await fetch("/api/ai-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, lang, contextData, history }),
+        signal: controller.signal,
+      });
+      const data = await response.json().catch(() => ({})) as { response?: unknown; mode?: unknown; cached?: unknown; sources?: unknown; error?: unknown };
+      if (!response.ok) {
+        if (response.status === 429) {
+          const wait = response.headers.get("Retry-After");
+          throw new Error(L(`Too many requests. Please wait ${wait ? `${wait}s` : "a moment"} before retrying.`, `Trop de requêtes. Veuillez patienter ${wait ? `${wait} s` : "un instant"} avant de réessayer.`));
+        }
+        throw new Error(typeof data.error === "string" ? data.error : L(`Assistant unavailable (HTTP ${response.status}).`, `Assistant indisponible (HTTP ${response.status}).`));
+      }
+      if (typeof data.response !== "string" || !data.response.trim()) throw new Error(L("The assistant returned an empty response.", "L'assistant a renvoyé une réponse vide."));
+      const mode: AssistantMode = data.mode === "ai" || data.mode === "cache" ? data.mode : "reference";
+      const sources = Array.isArray(data.sources) ? data.sources.filter((source): source is AssistantSource => !!source && typeof source === "object" && typeof (source as AssistantSource).id === "string" && typeof (source as AssistantSource).title === "string").slice(0, 6) : [];
+      const complete: AssistantMessage = {
+        id: assistantId, role: "assistant", text: data.response, createdAt: new Date().toISOString(), status: "complete", prompt,
+        mode, cached: data.cached === true, sources, latencyMs: Math.round(performance.now() - started),
+      };
+      setMessages((prev) => prev.map((message) => message.id === assistantId ? complete : message));
+      setFollowUps(followUpPrompts(complete, lang));
+    } catch (error) {
+      const aborted = controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError");
+      const text = aborted
+        ? L("Request stopped. You can retry the same question.", "Requête arrêtée. Vous pouvez réessayer la même question.")
+        : error instanceof Error ? error.message : L("The assistant could not be reached. Please retry.", "Impossible de joindre l'assistant. Veuillez réessayer.");
+      setMessages((prev) => prev.map((message) => message.id === assistantId ? { ...message, text, status: aborted ? "cancelled" : "error" } : message));
+    } finally {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+      controllerRef.current = null;
+      busyRef.current = false;
+      setBusy(false);
+      setTimeout(() => inputRef.current?.focus(), 0);
+    }
+  }, [contextTag, lang, L]);
+
+  useEffect(() => { sendRef.current = (prompt, options) => { void send(prompt, options); }; }, [send]);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ prompt?: string; equipmentTag?: string }>).detail;
       if (!detail?.prompt) return;
-      setIsOpen(true);
-      handleSend(detail.prompt);
+      setOpen(true);
+      if (detail.equipmentTag) setContextTag(detail.equipmentTag);
+      if (busyRef.current) {
+        setInput(detail.prompt.slice(0, ASSISTANT_MAX_PROMPT));
+        toast.info(L("The assistant is busy. Your question is ready to send when it finishes.", "L'assistant est occupé. Votre question est prête à être envoyée à la fin du traitement."));
+      } else {
+        sendRef.current(detail.prompt, { equipmentTag: detail.equipmentTag ?? null });
+      }
     };
     window.addEventListener("gnl1z:ask-ai", handler);
     return () => window.removeEventListener("gnl1z:ask-ai", handler);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [L]);
 
-  async function handleSend(customPrompt?: string) {
-    const prompt = (customPrompt ?? input).trim();
-    if (!prompt || loading) return;
+  const clearSession = () => {
+    controllerRef.current?.abort();
+    setMessages([]);
+    setInput("");
+    setFollowUps([]);
+    setConfirmClear(false);
+    clearAssistantSession();
+    toast.success(L("Chat session cleared.", "Session de discussion effacée."));
+    inputRef.current?.focus();
+  };
 
-    const userMsg: Message = { id: Date.now().toString(), sender: "user", text: prompt };
-    setMessages(prev => [...prev, userMsg]);
-    if (!customPrompt) setInput("");
-    setLoading(true);
-
+  const copyAnswer = async (message: AssistantMessage) => {
     try {
-      // Data minimization: send full records only for likely matches; otherwise
-      // send a compact static catalog. Manual drive IDs and the full spare-parts
-      // catalog are not needed by the assistant and are not transmitted.
-      const q = prompt.toLowerCase();
-      const matched = EQUIPMENT.filter((eq) => q.includes(eq.tag.toLowerCase()) || q.includes(eq.name.toLowerCase()) || q.includes(eq.unit.toLowerCase())).slice(0, 5);
-      const compactCatalog = EQUIPMENT.map((eq) => ({
-        tag: eq.tag, name: eq.name, unit: eq.unit, section: eq.section, type: eq.type, testing_status: eq.testing_status,
-        technical: { pressure_bar: eq.technical.pressure_bar, weight_kg: eq.technical.weight_kg, volume_m3: eq.technical.volume_m3, temperature_c: eq.technical.temperature_c },
-        maintenance: { last_tested: eq.maintenance.last_tested, next_test_due: eq.maintenance.next_test_due },
-      }));
-      const completePlantContext = {
-        facility: "Sonatrach GL1/Z Arzew LNG Complex",
-        process: "AP-C3MR™ Liquefaction",
-        masterEquipmentCatalog: matched.length ? matched : compactCatalog,
-        dcsPanelsList: DCS_PANELS.map(p => ({ id: p.id, title: p.title_en, section: p.section, tags: p.tags })),
-        operationalManualsList: MANUALS.map(m => ({ id: m.id, title: m.title_en, category: m.category })),
-        simulatedSafetyAlarms: liveAlarms.map(a => ({
-          tag: a.dbTag || a.tag, name: a.nameEn, unit: a.unit, severity: a.severity,
-          description: a.descriptionEn, simulated: true,
-        }))
-      };
-      const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 25_000);
-      let res: Response;
-      try {
-        res = await fetch("/api/ai-agent", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: controller.signal,
-          body: JSON.stringify({ prompt: prompt.slice(0, 2000), lang, contextData: completePlantContext })
-        });
-      } finally { window.clearTimeout(timeout); }
-
-      if (res.ok) {
-        const data = await res.json();
-        const aiMsg: Message = { 
-          id: (Date.now() + 1).toString(), 
-          sender: "ai", 
-          text: typeof data.response === "string" && data.response.trim() ? data.response : (lang === "fr" ? "La réponse du service est vide. Veuillez réessayer." : "The service returned an empty response. Please try again."),
-          cached: data.cached,
-          hitCount: data.hit_count
-        };
-        setMessages(prev => [...prev, aiMsg]);
-      } else {
-        throw new Error("API Network error");
-      }
-    } catch (err) {
-      console.error("[AiAgentChat] API error:", err);
-      const fallbackMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        sender: "ai",
-        text: lang === "fr"
-          ? "### Service indisponible\n\nJe ne peux pas vérifier les données ni produire une analyse pour le moment. Consultez le dossier équipement et les procédures approuvées, puis réessayez. Aucune prédiction de pression ou de défaillance n'a été générée."
-          : "### Assistant unavailable\n\nI cannot verify the data or produce an analysis right now. Consult the equipment record and approved procedures, then try again. No pressure or failure prediction has been generated.",
-        cached: false
-      };
-      setMessages(prev => [...prev, fallbackMsg]);
-    } finally {
-      setLoading(false);
+      await navigator.clipboard.writeText(message.text);
+      setCopiedId(message.id);
+      setTimeout(() => setCopiedId((id) => id === message.id ? null : id), 1500);
+    } catch {
+      toast.error(L("Copy failed. Select the text manually.", "Échec de la copie. Sélectionnez le texte manuellement."));
     }
-  }
+  };
 
-  const quickChips = [
-    { key: "predictChip", promptEn: "Review schedule for X01-E-501", promptFr: "Consulter l'échéance de X01-E-501", icon: AlertTriangle },
-    { key: "suggestToolsChip", promptEn: "Reference tools for X01-E-501", promptFr: "Outils de référence pour X01-E-501", icon: Hammer },
-    { key: "analyzeAlertsChip", promptEn: "Show simulated alarms", promptFr: "Afficher les alarmes simulées", icon: ShieldAlert },
-    { key: "judgmentChip", promptEn: "Review record for X01-F-502", promptFr: "Consulter le dossier de X01-F-502", icon: Sparkles },
-  ];
+  const chips = [t("predictChip"), t("suggestToolsChip"), t("analyzeAlertsChip"), t("judgmentChip")];
+  const trimmed = input.trim();
+  const overLimit = input.length > ASSISTANT_MAX_PROMPT;
 
   return (
-    <div className="fixed bottom-4 right-4 z-40 sm:bottom-6 sm:right-6 font-sans">
-      {!isOpen && (
-        <button
-          onClick={() => setIsOpen(true)}
-          aria-label={t("aiAssistant")}
-          className="group relative flex items-center gap-3 bg-gradient-to-r from-cyan-600 via-blue-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white px-5 py-3.5 rounded-full shadow-[0_10px_30px_rgba(6,182,212,0.4)] hover:shadow-[0_15px_40px_rgba(6,182,212,0.6)] border border-cyan-400/30 transition-all duration-300 transform hover:scale-105 motion-reduce:transform-none cursor-pointer"
-        >
-          <Bot className="h-6 w-6 text-white animate-bounce motion-reduce:animate-none" />
-          <span className="hidden sm:inline font-mono font-bold text-sm tracking-wide pr-1">{t("aiAssistant")}</span>
-          <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75 motion-reduce:animate-none"></span>
-            <span className="relative inline-flex rounded-full h-4 w-4 bg-amber-500 border border-slate-900"></span>
-          </span>
-        </button>
-      )}
+    <>
+      <button
+        ref={launcherRef}
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-label={open ? L("Close Expert AI GNL1", "Fermer Expert AI GNL1") : L("Open Expert AI GNL1", "Ouvrir Expert AI GNL1")}
+        aria-expanded={open}
+        aria-controls="expert-ai-gnl1-panel"
+        className="fixed bottom-4 right-4 z-50 flex h-14 items-center gap-2.5 rounded-2xl border border-cyan-500/40 bg-gradient-to-br from-cyan-600 to-blue-700 px-4 text-white shadow-[0_8px_30px_rgba(8,145,178,0.35)] transition-transform hover:scale-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:bottom-6 sm:right-6"
+      >
+        {open ? <X className="h-5 w-5" /> : <Sparkles className="h-5 w-5" />}
+        <span className="hidden font-mono text-sm font-bold tracking-wide sm:inline">{ASSISTANT_NAME}</span>
+      </button>
 
-      {isOpen && (
-        <div role="dialog" aria-label={t("aiAssistant")} className="w-[calc(100vw-2rem)] max-w-[460px] h-[min(620px,calc(100dvh-6rem))] bg-card/95 border border-border backdrop-blur-2xl rounded-3xl shadow-[0_20px_70px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden">
-          <div className="px-6 py-4 bg-card/80 border-b border-border flex items-center justify-between">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-slate-950 shadow-lg shadow-cyan-500/20">
-                <Sparkles className="h-5 w-5 text-foreground" />
+      {open && (
+        <div
+          id="expert-ai-gnl1-panel"
+          role="dialog"
+          aria-label={ASSISTANT_NAME}
+          className="fixed bottom-24 left-4 right-4 z-50 flex h-[min(680px,calc(100dvh-8rem))] max-w-[480px] flex-col overflow-hidden rounded-3xl border border-border bg-card/95 shadow-[0_20px_70px_rgba(0,0,0,0.55)] backdrop-blur-2xl sm:left-auto sm:right-6 sm:w-[460px]"
+        >
+          <header className="flex items-start justify-between gap-3 border-b border-border bg-gradient-to-r from-cyan-600/10 to-blue-600/10 px-4 py-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10">
+                <Sparkles className="h-5 w-5 text-cyan-600 dark:text-cyan-400" />
               </div>
               <div className="min-w-0">
-                <h3 className="text-base font-bold text-foreground tracking-tight flex items-center gap-2 truncate">
-                  {t("aiAssistant")}
-                  <span className="text-[10px] font-mono bg-cyan-500/10 border border-cyan-500/30 text-cyan-700 dark:text-cyan-400 px-2.5 py-0.5 rounded-full animate-pulse shadow-inner">
-                    STATIC REFERENCE
-                  </span>
-                </h3>
-                <p className="text-[11px] text-muted-foreground font-mono truncate">{t("aiSubtitle")}</p>
+                <h2 className="truncate font-mono text-sm font-bold tracking-wide">{ASSISTANT_NAME}</h2>
+                <p className="truncate text-[11px] text-muted-foreground">{t("aiSubtitle")}</p>
               </div>
             </div>
-            <button
-              onClick={() => setIsOpen(false)}
-              aria-label={lang === "fr" ? "Fermer l'assistant" : "Close assistant"}
-              className="p-2.5 rounded-xl bg-secondary border border-border text-muted-foreground hover:text-foreground transition-all cursor-pointer shrink-0 shadow-md"
+            <div className="flex shrink-0 items-center gap-1">
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setConfirmClear(true)} disabled={!messages.length || busy} aria-label={L("Clear chat session", "Effacer la session")} title={L("Clear chat session", "Effacer la session")}>
+                <Trash2 className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setOpen(false); launcherRef.current?.focus(); }} aria-label={L("Close assistant", "Fermer l'assistant")}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </header>
+
+          {contextTag && (
+            <div className="flex items-center gap-2 border-b border-border bg-secondary/40 px-4 py-1.5 text-[11px] font-mono">
+              <span className="text-muted-foreground">{L("Context", "Contexte")}:</span>
+              <Link to={`/equipment/${encodeURIComponent(contextTag)}`} className="font-bold text-cyan-700 underline-offset-2 hover:underline dark:text-cyan-300">{contextTag}</Link>
+              <button type="button" onClick={() => setContextTag(null)} className="ml-auto rounded p-0.5 text-muted-foreground hover:text-foreground" aria-label={L("Clear equipment context", "Effacer le contexte équipement")}><X className="h-3 w-3" /></button>
+            </div>
+          )}
+
+          {confirmClear && (
+            <div className="flex items-center justify-between gap-2 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs">
+              <span>{L("Clear this chat session?", "Effacer cette session de discussion ?")}</span>
+              <div className="flex gap-1.5">
+                <Button size="sm" variant="destructive" className="h-7 px-2.5 text-xs" onClick={clearSession}>{L("Clear", "Effacer")}</Button>
+                <Button size="sm" variant="ghost" className="h-7 px-2.5 text-xs" onClick={() => setConfirmClear(false)}>{L("Cancel", "Annuler")}</Button>
+              </div>
+            </div>
+          )}
+
+          <div className="relative min-h-0 flex-1">
+            <div
+              ref={listRef}
+              role="log"
+              aria-live="polite"
+              aria-relevant="additions text"
+              onScroll={() => {
+                const el = listRef.current;
+                if (el) setShowJump(el.scrollHeight - el.scrollTop - el.clientHeight > 160);
+              }}
+              className="h-full space-y-4 overflow-y-auto px-4 py-4"
             >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-5 space-y-4 bg-secondary/40">
-            {messages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex ${msg.sender === "user" ? "justify-end" : "justify-start"}`}
-              >
-                <div
-                  className={`max-w-[85%] p-4 rounded-2xl text-xs md:text-sm font-light leading-relaxed shadow-lg relative ${
-                    msg.sender === "user"
-                      ? "bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-tr-none font-sans"
-                      : "bg-card border border-border text-foreground rounded-tl-none font-mono"
-                  }`}
-                >
-                  {/* 🚀 MASTER ENHANCEMENT: SUPABASE AI CACHE HIT INDICATOR PILL */}
-                  {msg.sender === "ai" && msg.cached && (
-                    <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-400 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold mb-3 shadow-inner w-fit">
-                      <Zap className="h-3 w-3 text-emerald-700 dark:text-emerald-400 animate-pulse" />
-                      {lang === "en" ? `SUPABASE CACHE HIT (0ms) • ${msg.hitCount} Hits` : `CACHE SUPABASE (0ms) • ${msg.hitCount} Requêtes`}
-                    </div>
-                  )}
-
-                  {msg.sender === "ai" ? (
-                    <MarkdownText text={msg.text} />
-                  ) : (
-                    msg.text
-                  )}
+              {messages.length === 0 && (
+                <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-cyan-500/30 bg-cyan-500/10">
+                    <MessageSquare className="h-7 w-7 text-cyan-600 dark:text-cyan-400" />
+                  </div>
+                  <div>
+                    <p className="font-mono text-sm font-bold">{ASSISTANT_NAME}</p>
+                    <p className="mx-auto mt-1 max-w-[300px] text-xs leading-relaxed text-muted-foreground">{L("Ask about an equipment tag, test schedule, simulated alarm, DCS panel, or manual. Answers cite the supplied register data.", "Posez une question sur un repère d'équipement, une échéance d'essai, une alarme simulée, un panneau DCS ou un manuel. Les réponses citent les données du registre fournies.")}</p>
+                  </div>
+                  <div className="grid w-full gap-2">
+                    {chips.map((chip) => (
+                      <button key={chip} type="button" onClick={() => sendRef.current(chip)} className="rounded-xl border border-border bg-secondary/50 px-3 py-2 text-left text-xs transition-colors hover:border-cyan-500/40 hover:bg-cyan-500/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">{chip}</button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )}
 
-            {loading && (
-              <div className="flex justify-start">
-                <div className="max-w-[80%] p-4 rounded-2xl bg-card border border-border text-muted-foreground rounded-tl-none font-mono text-xs flex items-center gap-3 shadow-lg">
-                  <RefreshCw className="h-4 w-4 text-cyan-700 dark:text-cyan-400 animate-spin" />
-                  <span className="animate-pulse">{t("expertThinking")}</span>
+              {messages.map((message) => (
+                <article key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[92%] rounded-2xl px-3.5 py-2.5 ${message.role === "user" ? "bg-gradient-to-br from-cyan-600 to-blue-700 text-white" : message.status === "error" ? "border border-rose-500/40 bg-rose-500/10" : message.status === "cancelled" ? "border border-amber-500/30 bg-amber-500/10" : "border border-border bg-secondary/40"}`}>
+                    {message.role === "user" ? (
+                      <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.text}</p>
+                    ) : message.status === "loading" ? (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground" role="status">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-cyan-500" />
+                        <span className="animate-pulse">{t("expertThinking")}</span>
+                      </div>
+                    ) : (
+                      <>
+                        {message.status === "complete" ? <MarkdownText text={message.text} /> : <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.text}</p>}
+                        {message.status === "complete" && message.sources?.length ? <SourceCards sources={message.sources} lang={lang} onNavigate={() => setOpen(false)} /> : null}
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] font-mono text-muted-foreground">
+                          {message.status === "complete" && (
+                            <>
+                              <span className="rounded border border-border px-1.5 py-0.5">{modeLabel(message.mode, lang)}</span>
+                              {typeof message.latencyMs === "number" && message.latencyMs > 0 && <span>{(message.latencyMs / 1000).toFixed(1)}s</span>}
+                              <button type="button" onClick={() => void copyAnswer(message)} className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:text-foreground" aria-label={L("Copy answer", "Copier la réponse")}>
+                                {copiedId === message.id ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                                {copiedId === message.id ? t("copied") : t("copy")}
+                              </button>
+                            </>
+                          )}
+                          {(message.status === "error" || message.status === "cancelled") && message.prompt && (
+                            <button type="button" onClick={() => sendRef.current(message.prompt!, { retryId: message.id })} disabled={busy} className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 hover:bg-secondary disabled:opacity-50">
+                              <RotateCcw className="h-3 w-3" />{L("Retry", "Réessayer")}
+                            </button>
+                          )}
+                          <time dateTime={message.createdAt} className="ml-auto">{new Date(message.createdAt).toLocaleTimeString(fr ? "fr-FR" : "en-GB", { hour: "2-digit", minute: "2-digit" })}</time>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </article>
+              ))}
+
+              {followUps.length > 0 && !busy && (
+                <div className="flex flex-wrap gap-1.5">
+                  {followUps.map((prompt) => (
+                    <button key={prompt} type="button" onClick={() => sendRef.current(prompt)} className="rounded-full border border-cyan-500/25 bg-cyan-500/5 px-2.5 py-1 text-[11px] text-cyan-700 transition-colors hover:border-cyan-500/50 dark:text-cyan-300">{prompt}</button>
+                  ))}
                 </div>
-              </div>
+              )}
+            </div>
+            {showJump && (
+              <button type="button" onClick={() => scrollToLatest()} className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-border bg-card/95 p-2 shadow-lg" aria-label={L("Jump to latest message", "Aller au dernier message")}>
+                <ArrowDown className="h-4 w-4" />
+              </button>
             )}
-            <div ref={messagesEndRef} />
           </div>
 
-          <div className="px-5 py-3 bg-secondary/60 border-t border-border flex gap-2 overflow-x-auto scrollbar-none">
-            {quickChips.map((chip) => {
-              const Icon = chip.icon;
-              const prompt = lang === "fr" ? chip.promptFr : chip.promptEn;
-              return (
-                <button
-                  key={chip.key}
-                  onClick={() => handleSend(prompt)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-card hover:bg-secondary border border-border text-[11px] font-mono text-muted-foreground hover:text-cyan-400 transition-all shrink-0 cursor-pointer shadow-sm font-bold"
-                >
-                  <Icon className="h-3.5 w-3.5 text-cyan-700 dark:text-cyan-400" />
-                  {t(chip.key)}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="p-4 bg-background border-t border-border flex items-center gap-3">
-            <input
-              type="text"
-              maxLength={2000}
-              aria-label={t("askAiPlaceholder")}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSend()}
-              placeholder={t("askAiPlaceholder")}
-              className="flex-1 bg-card border border-border rounded-xl px-4 py-3.5 text-xs text-foreground placeholder-slate-500 focus:border-cyan-500 focus:outline-none transition-colors font-mono shadow-inner"
-            />
-            <button
-              onClick={() => handleSend()}
-              aria-label={lang === "fr" ? "Envoyer la question" : "Send question"}
-              disabled={loading || !input.trim()}
-              className={`p-3.5 rounded-xl transition-all flex items-center justify-center shrink-0 cursor-pointer shadow-lg ${
-                loading || !input.trim()
-                  ? "bg-secondary border-border text-muted-foreground cursor-not-allowed"
-                  : "bg-cyan-600 hover:bg-cyan-500 text-white shadow-cyan-500/20"
-              }`}
-            >
-              <Send className="h-4 w-4" />
-            </button>
-          </div>
+          <footer className="border-t border-border bg-card/80 px-3 pb-3 pt-2">
+            <div className="flex items-end gap-2">
+              <label htmlFor="expert-ai-gnl1-input" className="sr-only">{t("askAiPlaceholder")}</label>
+              <textarea
+                id="expert-ai-gnl1-input"
+                ref={inputRef}
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    if (trimmed && !overLimit && !busy) sendRef.current(input);
+                  }
+                }}
+                rows={2}
+                maxLength={ASSISTANT_MAX_PROMPT + 1}
+                placeholder={t("askAiPlaceholder")}
+                className="max-h-32 min-h-[52px] flex-1 resize-none rounded-xl border border-border bg-background/70 px-3 py-2 text-sm leading-relaxed placeholder:text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500"
+              />
+              {busy ? (
+                <Button type="button" size="icon" variant="outline" className="h-[52px] w-[52px] shrink-0 rounded-xl" onClick={() => controllerRef.current?.abort()} aria-label={L("Stop response", "Arrêter la réponse")} title={L("Stop response", "Arrêter la réponse")}>
+                  <Square className="h-4 w-4" />
+                </Button>
+              ) : (
+                <Button type="button" size="icon" className="h-[52px] w-[52px] shrink-0 rounded-xl bg-gradient-to-br from-cyan-600 to-blue-700 hover:from-cyan-500 hover:to-blue-600" disabled={!trimmed || overLimit} onClick={() => sendRef.current(input)} aria-label={L("Send message", "Envoyer le message")}>
+                  <Send className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+            <div className="mt-1.5 flex items-center justify-between gap-2 px-1 text-[10px] text-muted-foreground">
+              <span className="flex items-center gap-1"><ShieldCheck className="h-3 w-3 shrink-0" />{L("Static register + simulated alarms. Not live telemetry or an operating authorization.", "Registre statique + alarmes simulées. Pas de télémétrie temps réel ni d'autorisation d'exploitation.")}</span>
+              <span className={`shrink-0 font-mono ${overLimit ? "text-rose-500" : ""}`}>{input.length}/{ASSISTANT_MAX_PROMPT}</span>
+            </div>
+          </footer>
         </div>
       )}
-    </div>
+    </>
   );
 }

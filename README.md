@@ -33,8 +33,11 @@ Client variables are documented in `.env.example`. Only the Supabase publishable
 
 Optional Cloudflare Pages Function variables:
 
-- `GEMINI_API_KEY` — server-side AI provider key. Without it, the assistant returns bounded static-reference answers only.
+- `GEMINI_API_KEY` — server-side AI provider key. Without it, Expert AI GNL1 returns bounded static-reference answers only.
 - `GEMINI_MODEL` — optional provider model override.
+- `ASSISTANT_RATE_LIMIT_PER_MIN` — optional per-IP assistant rate limit, default `20`.
+
+See [docs/AI_ASSISTANT.md](docs/AI_ASSISTANT.md) for the assistant's data boundaries, modes, API contract, and local preview bridge.
 
 ## Deployment
 

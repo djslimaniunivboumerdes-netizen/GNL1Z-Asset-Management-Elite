@@ -2,6 +2,15 @@
 
 This pass keeps the existing industrial visual language while fixing high-impact workflow, mobile, and loading problems.
 
+## Expert AI GNL1 enhancement
+
+- The assistant is now named **Expert AI GNL1** and is explicitly a bounded register-reference assistant, not a prediction engine or live telemetry source.
+- Equipment-aware answers prioritize an explicit tag over neighboring unit matches, flag missing register fields, and return source cards for equipment, DCS panels, manuals, and simulated alarms.
+- Chat history persists per browser tab with an eight-hour expiry, confirmed clear, copy, stop, retry, follow-up prompts, and Enter/Shift+Enter keyboard handling.
+- The endpoint accepts bounded conversation history, minimizes provider context further, returns `sources[]`, and applies a best-effort per-IP rate limit (`429` + `Retry-After`).
+- A dev/preview-only Vite middleware bridges `/api/ai-agent` to the Pages Function so the assistant works behind the HTTPS preview proxy.
+- Follow-up validation: `npm run check` passed with 13 test files / 71 tests; production preview browser smoke passed 9/9 assistant checks. See [AI_ASSISTANT.md](AI_ASSISTANT.md) for the full contract and safety boundaries.
+
 ## Reliability and safety
 
 - Maintenance schedules now use one date/status contract. Only a passed test can advance a schedule; failed or pending tests cannot roll dates back. Confirmed manual dates take priority.
