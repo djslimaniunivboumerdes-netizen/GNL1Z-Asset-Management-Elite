@@ -125,7 +125,7 @@ export default function Manuals() {
   // ── In-document search handler ──
   const handleDocSearch = async () => {
     const term = docQuery.trim();
-    if (!term) return;
+    if (term.length < 2) return;
 
     abortRef.current?.abort();
     abortRef.current = new AbortController();
@@ -260,7 +260,7 @@ export default function Manuals() {
                 </button>
               )}
             </div>
-            <Button onClick={() => void handleDocSearch()} disabled={docSearching || !docQuery.trim()}
+            <Button onClick={() => void handleDocSearch()} disabled={docSearching || docQuery.trim().length < 2}
               className="h-11 px-5 bg-orange-500 hover:bg-orange-500/90 text-foreground font-mono gap-2">
               {docSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
               {lang === "en" ? "Search" : "Rechercher"}

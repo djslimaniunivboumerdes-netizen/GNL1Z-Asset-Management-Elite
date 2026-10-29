@@ -43,7 +43,7 @@ function assistantApiPlugin(): Plugin {
         body: req.method === "POST" ? Buffer.concat(chunks) : undefined,
       });
       const response = isManualSearch
-        ? (req.method === "OPTIONS" ? await searchManualOptions() : await searchManualPost({ request }))
+        ? (req.method === "OPTIONS" ? await searchManualOptions({ request }) : await searchManualPost({ request, env: process.env }))
         : (req.method === "OPTIONS" ? await onRequestOptions({ request }) : await onRequestPost({ request, env: process.env }));
       res.statusCode = response.status;
       response.headers.forEach((value, key) => res.setHeader(key, value));

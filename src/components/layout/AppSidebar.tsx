@@ -21,6 +21,7 @@ export function AppSidebar() {
     { title: t("fastAlerts"),   url: "/alerts",        icon: ShieldAlert },
     { title: t("dcs"), url: "/dcs", icon: Cpu },
     { title: t("smartFlow"), url: "/smart-flow", icon: GitBranch },
+    { title: t("pidLibrary"), url: "/pids", icon: FileText },
     { title: t("news"), url: "/news", icon: Newspaper },
     { title: t("manuals"), url: "/manuals", icon: BookOpen },
     { title: t("author"), url: "/author", icon: User },

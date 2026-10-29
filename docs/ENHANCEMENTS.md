@@ -46,6 +46,18 @@ This pass keeps the existing industrial visual language while fixing high-impact
 - Assistant/manual-search endpoints enforce same-origin requests and bounded payloads; the assistant no longer uses a Supabase service-role key or claims live telemetry.
 - CI validates locked install, typecheck, lint, tests, and production build.
 
+## Senior takeover review (2026-10-29)
+
+Full-stack + P&ID engineering review of merged `main`, implemented on branch `arena/dd66957c-gnl1z-asset-management-elite`.
+
+- **P&ID Library shipped.** The finished 695-line P&ID catalog page (`src/pages/PIDViewer.tsx`) existed but was never routed — a gap, not a design choice. It is now reachable at `/pids` (sidebar entry + ⌘K global search), covering 30 sheets across 12 process sections with bilingual UI.
+- **Local vector PDFs.** The index builder now also emits `src/data/pid_sheet_files.json`; 28/30 sheets resolve to locally served vector PDFs (`/pids/*.pdf`). The viewer prefers the local PDF (browser-native, offline-capable via the PWA image/PDF caches) and keeps Google Drive as preview/fallback; cards carry a `LOCAL` badge.
+- **Dead code removed (45 files).** Unrouted pages `DigitalTwin` (fake-telemetry toy), `ProcessFlow` (superseded by Smart Flow), `PFDCoordinateCalibration` (OCR dev tool); stub components `CreateAlert`, `FastAlertPanel`, `NavLink`; 32 unused shadcn/ui files; orphan `lib/testSchedule`, `utils/extractTagCoordinates`, `data/process_nodes`, `data/processFlowCoordinates.ts`, `integrations/supabase/storage`; plus `public/manifest.json` (duplicate of the generated `manifest.webmanifest`), `capacitor.config.ts` (no Capacitor dependencies), and empty unreferenced `equipment_master.json`.
+- **Dependencies slimmed (30 removed).** `reactflow`, `tesseract.js`, `zod`, `react-hook-form` + `@hookform/resolvers`, `embla-carousel-react`, `input-otp`, `vaul`, `react-day-picker`, `date-fns`, `react-resizable-panels`, 19 unused Radix packages, `eslint-config-prettier`. Both lockfiles regenerated (`package-lock.json`, `bun.lock`); npm ci drops from 1,155 to ~1,070 packages.
+- **Supply chain: `npm audit` 22 → 4.** Upgraded `react-router-dom` 6 → 7.18.5 (fixes CVE-2025-68470 open-redirect; app only navigates to internal paths, tests green), `sharp` → 0.35.5, `electron` → 45, `electron-builder` + `electron-builder-squirrel-windows` → 26.18 (fixes the critical `tar` chain). Remaining 4 findings are low-severity `vite-plugin-pwa`/`workbox-build` build-tool advisories with no patched release.
+- **`/api/search-manual` hardening.** Same-origin only with origin echo (wildcard `Access-Control-Allow-Origin: *` removed), per-IP rate limit (default 15/min, env `MANUAL_RATE_LIMIT_PER_MIN`, `429` + `Retry-After`), drive IDs restricted to the checked-in `MANUALS` catalogue (no arbitrary Drive pulls), ≥2-character queries, and late-rejection guards so timed-out Drive fetches cannot become unhandled rejections. Covered by a new 6-test endpoint suite.
+- **Correctness fixes.** `index.html` social preview pointed at missing `/sonatrach-logo.png` (asset added to `public/`); `package.json` was missing Electron's `main` entry (`electron/main.js`), so `npm run electron:dev` could never start; Manuals search button disabled until ≥2 characters to match the API contract.
+
 ## Validation
 
 - `npm run check`: TypeScript, ESLint (0 errors / 10 existing warnings), and Vitest (16 files / 87 tests).

@@ -1,11 +1,17 @@
 import React, { useState, useMemo, useCallback } from "react";
 import { useI18n } from "@/contexts/I18nContext";
-import { X, ZoomIn, ExternalLink, Search, Filter, ChevronRight, FileImage } from "lucide-react";
+import { X, ZoomIn, ExternalLink, Search, Filter, ChevronRight, FileImage, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import LOCAL_FILES from "@/data/pid_sheet_files.json";
 
 const ACCENT = "#f97316";
+
+// Sheet id → locally served vector PDF (offline-capable via the app shell).
+const SHEET_FILES = LOCAL_FILES as Record<string, string>;
+// BASE_URL keeps paths correct under the Electron "./" base.
+const assetUrl = (p: string) => `${import.meta.env.BASE_URL}${p.replace(/^\//, "")}`;
 
 // ─── PID Sections ────────────────────────────────────────────────────────────
 type SectionKey =
@@ -389,6 +395,7 @@ export default function PIDViewer() {
   const closeSheet = useCallback(() => setSelected(null), []);
 
   const T = (en: string, fr: string) => (lang === "fr" ? fr : en);
+  const selectedLocal = selected ? SHEET_FILES[selected.id] ?? null : null;
 
   return (
     <div className="min-h-screen bg-background">
@@ -403,8 +410,8 @@ export default function PIDViewer() {
         </h1>
         <p className="text-muted-foreground max-w-2xl text-sm md:text-base">
           {T(
-            "GNL1Z liquefaction train P&ID sheets organized by process section. Click any sheet to view the full diagram. Open in Google Drive for full resolution.",
-            "Feuilles P&ID du train de liquéfaction GNL1Z organisées par section procédé. Cliquez une feuille pour afficher le schéma complet. Ouvrir dans Google Drive pour la pleine résolution."
+            "GNL1Z liquefaction train P&ID sheets organized by process section. Click any sheet to view the full diagram — local vector PDFs open instantly, Google Drive covers the rest.",
+            "Feuilles P&ID du train de liquéfaction GNL1Z organisées par section procédé. Cliquez une feuille pour afficher le schéma complet — les PDF vectoriels locaux s'ouvrent instantanément, Google Drive couvre les autres."
           )}
         </p>
 
@@ -508,6 +515,7 @@ export default function PIDViewer() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {filtered.map((sheet) => {
                 const sec = SECTIONS[sheet.section];
+                const local = SHEET_FILES[sheet.id];
                 return (
                   <button
                     key={sheet.id}
@@ -544,6 +552,14 @@ export default function PIDViewer() {
                       >
                         {sec.icon}
                       </div>
+                      {local && (
+                        <div
+                          className="absolute top-2 right-2 px-2 py-0.5 rounded text-[9px] font-mono font-bold uppercase tracking-wider bg-emerald-600 text-white"
+                          title={T("Served locally (works offline)", "Servi localement (fonctionne hors ligne)")}
+                        >
+                          {T("Local", "Local")}
+                        </div>
+                      )}
                     </div>
 
                     {/* Info */}
@@ -601,6 +617,18 @@ export default function PIDViewer() {
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
+              {selectedLocal && (
+                <a
+                  href={assetUrl(selectedLocal)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 transition-colors"
+                  title={T("Vector PDF served from the app (offline capable)", "PDF vectoriel servi par l'application (hors ligne)")}
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  {T("Local PDF", "PDF local")}
+                </a>
+              )}
               <a
                 href={viewUrl(selected.driveId)}
                 target="_blank"
@@ -663,7 +691,19 @@ export default function PIDViewer() {
                 </div>
               </div>
 
-              <div className="mt-auto">
+              <div className="mt-auto flex flex-col gap-2">
+                {selectedLocal && (
+                  <a
+                    href={assetUrl(selectedLocal)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 w-full px-3 py-2 rounded text-xs font-mono border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 transition-colors"
+                  >
+                    <FileText className="h-3.5 w-3.5" />
+                    {T("Local vector PDF", "PDF vectoriel local")}
+                    <ChevronRight className="h-3.5 w-3.5 ml-auto" />
+                  </a>
+                )}
                 <a
                   href={viewUrl(selected.driveId)}
                   target="_blank"
@@ -680,8 +720,8 @@ export default function PIDViewer() {
             {/* iframe preview */}
             <div className="flex-1 relative bg-[hsl(220_25%_4%)]">
               <iframe
-                key={selected.driveId}
-                src={previewUrl(selected.driveId)}
+                key={selectedLocal ?? selected.driveId}
+                src={selectedLocal ? assetUrl(selectedLocal) : previewUrl(selected.driveId)}
                 title={lang === "fr" ? selected.title.fr : selected.title.en}
                 className="w-full h-full border-0"
                 allow="autoplay"

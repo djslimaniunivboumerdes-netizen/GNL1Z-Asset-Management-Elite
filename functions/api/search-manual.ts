@@ -5,44 +5,94 @@
 //
 // Uses only Web-standard APIs (DecompressionStream, DataView, fetch).
 // No npm packages, no CLI deploy needed.
+//
+// Hardening: same-origin only (origin echo, never wildcard), per-IP rate limit,
+// and drive IDs restricted to the checked-in MANUALS catalogue so the endpoint
+// cannot be used to pull arbitrary Google Drive documents.
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Content-Type": "application/json",
-};
+import { MANUALS } from "../../src/data/manuals";
 
 interface ManualMeta { id: string; title: string; driveId: string }
 interface SearchHit  { id: string; title: string; driveId: string; count: number; snippets: string[] }
 
-// ── Entry points ──────────────────────────────────────────────────────────────
-export async function onRequestOptions(): Promise<Response> {
-  return new Response(null, { headers: CORS });
+const ALLOWED_DRIVE_IDS = new Set(MANUALS.map((m) => m.drive_id));
+
+function sameOrigin(request: Request): string | null | undefined {
+  const origin = request.headers.get("Origin");
+  if (!origin) return null;
+  return origin === new URL(request.url).origin ? origin : undefined;
+}
+function json(status: number, body: unknown, origin: string | null): Response {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+  };
+  if (origin) { headers["Access-Control-Allow-Origin"] = origin; headers["Vary"] = "Origin"; }
+  return Response.json(body, { status, headers });
 }
 
-export async function onRequestPost(ctx: { request: Request }): Promise<Response> {
-  const origin = ctx.request.headers.get("Origin");
-  if (origin && origin !== new URL(ctx.request.url).origin) {
-    return Response.json({ error: "Origin not allowed" }, { status: 403, headers: CORS });
+// Best-effort per-IP limiter (per isolate), mirroring /api/ai-agent.
+const RATE_WINDOW_MS = 60_000;
+const rateLimits = new Map<string, { count: number; resetAt: number }>();
+function rateLimit(request: Request, env?: Record<string, string | undefined>): { limited: boolean; retryAfter: number } {
+  const configured = Number(env?.MANUAL_RATE_LIMIT_PER_MIN);
+  const limit = Number.isSafeInteger(configured) && configured > 0 && configured <= 1000 ? configured : 15;
+  const ip = request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+  const now = Date.now();
+  const current = rateLimits.get(ip);
+  if (!current || current.resetAt <= now) {
+    rateLimits.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
+    if (rateLimits.size > 5000) for (const [key, value] of rateLimits) if (value.resetAt <= now) rateLimits.delete(key);
+    return { limited: false, retryAfter: 0 };
+  }
+  current.count += 1;
+  return { limited: current.count > limit, retryAfter: Math.max(1, Math.ceil((current.resetAt - now) / 1000)) };
+}
+
+// ── Entry points ──────────────────────────────────────────────────────────────
+export function onRequestOptions(ctx: { request: Request }): Response {
+  const origin = sameOrigin(ctx.request);
+  if (origin === undefined) return json(403, { error: "Origin not allowed" }, null);
+  return new Response(null, { status: 204, headers: {
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    ...(origin ? { "Access-Control-Allow-Origin": origin, Vary: "Origin" } : {}),
+  } });
+}
+
+export async function onRequestPost(ctx: { request: Request; env?: Record<string, string | undefined> }): Promise<Response> {
+  const origin = sameOrigin(ctx.request);
+  if (origin === undefined) return json(403, { error: "Origin not allowed" }, null);
+  const rate = rateLimit(ctx.request, ctx.env);
+  if (rate.limited) {
+    return new Response(JSON.stringify({ error: "Too many search requests. Please wait before retrying." }), {
+      status: 429,
+      headers: {
+        "Content-Type": "application/json",
+        "Retry-After": String(rate.retryAfter),
+        ...(origin ? { "Access-Control-Allow-Origin": origin, Vary: "Origin" } : {}),
+      },
+    });
   }
   let query = "", manuals: ManualMeta[] = [];
   try {
     const raw = await ctx.request.text();
-    if (new TextEncoder().encode(raw).length > 64 * 1024) return Response.json({ error: "Request too large" }, { status: 413, headers: CORS });
+    if (new TextEncoder().encode(raw).length > 64 * 1024) return json(413, { error: "Request too large" }, origin);
     const body = JSON.parse(raw) as { query?: unknown; manuals?: unknown };
     query = typeof body.query === "string" ? body.query.trim().slice(0, 200) : "";
     manuals = Array.isArray(body.manuals) ? body.manuals.slice(0, 30).filter((m): m is ManualMeta => {
       if (!m || typeof m !== "object") return false;
       const item = m as Record<string, unknown>;
-      return typeof item.id === "string" && typeof item.title === "string" && typeof item.driveId === "string" && /^[A-Za-z0-9_-]{10,100}$/.test(item.driveId);
+      return typeof item.id === "string" && typeof item.title === "string" && typeof item.driveId === "string"
+        && ALLOWED_DRIVE_IDS.has(item.driveId);
     }) : [];
   } catch {
-    return Response.json({ error: "Bad request" }, { status: 400, headers: CORS });
+    return json(400, { error: "Bad request" }, origin);
   }
 
-  if (!query || !manuals.length) {
-    return Response.json({ results: [] }, { headers: CORS });
+  if (query.length < 2 || !manuals.length) {
+    return json(200, { results: [] }, origin);
   }
 
   const settled = await Promise.allSettled(
@@ -56,7 +106,7 @@ export async function onRequestPost(ctx: { request: Request }): Promise<Response
     .filter((r): r is SearchHit => r !== null && r.count > 0)
     .sort((a, b) => b.count - a.count);
 
-  return Response.json({ results }, { headers: CORS });
+  return json(200, { results }, origin);
 }
 
 // ── Search one manual ─────────────────────────────────────────────────────────
@@ -245,6 +295,8 @@ function findSnippets(text: string, query: string, ctx = 200, max = 5): string[]
 
 // ── Timeout race ──────────────────────────────────────────────────────────────
 function race<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  // A late Drive failure must never surface as an unhandled rejection.
+  promise.catch(() => undefined);
   return Promise.race([
     promise,
     new Promise<T>(res => setTimeout(() => res(fallback), ms)),
