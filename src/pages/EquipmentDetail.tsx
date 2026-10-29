@@ -539,7 +539,7 @@ function EngineeringJudgmentTab({ judgment, lang, tag }: { judgment: ReturnType<
     const prompt = lang === "fr"
       ? `Explique en détail le jugement d'ingénierie et les recommandations de sécurité pour ${tag}.`
       : `Explain in detail the engineering judgment and safety recommendations for ${tag}.`;
-    window.dispatchEvent(new CustomEvent("gnl1z:ask-ai", { detail: { prompt } }));
+    window.dispatchEvent(new CustomEvent("gnl1z:ask-ai", { detail: { prompt, equipmentTag: tag } }));
   };
 
   return (

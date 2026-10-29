@@ -1,0 +1,58 @@
+{
+  "date": "2026-10-29",
+  "scope": "Expert AI GNL1 smart source-backed layer, isolated preview only",
+  "commands": {
+    "npm run check": "passed: typecheck, ESLint 0 errors / 10 existing warnings, Vitest 16 files / 87 tests",
+    "npm run build": "passed: main JS 676.08 kB / 206.29 kB gzip; AiAgentChat 84.07 kB / 18.15 kB gzip; PWA 100 entries / 3833.65 KiB",
+    "preview": "http://localhost:8081 (0.0.0.0), dev/preview API bridge enabled for /api/ai-agent and /api/search-manual"
+  },
+  "knowledgeCoverage": {
+    "equipmentRecords": 77,
+    "pidSheets": 30,
+    "pidLocalFiles": 44,
+    "pidTextIndexed": 0,
+    "dcsPanels": 23,
+    "manualTitles": 23,
+    "manualContentLoaded": false,
+    "verifiedLineList": false,
+    "drawingOnlyTags": 69,
+    "aliasConflicts": 1
+  },
+  "apiSmoke": {
+    "sameOriginReference": 200,
+    "crossOrigin": 403,
+    "frenchReference": 200,
+    "aliasVariants": {
+      "e 501": "X01-E-501",
+      "X01-E 501": "X01-E-501",
+      "X01-E-501": "X01-E-501"
+    },
+    "e520PipelineCountWithoutCsv": {
+      "mode": "reference",
+      "verifiedLineList": false,
+      "responseContains": "Piping answer not yet verified",
+      "pidSource": true
+    },
+    "e520PipelineCountWithCsv": {
+      "verifiedLineList": true,
+      "distinctLineCount": 2
+    },
+    "g781Unknown": {
+      "resolution": "unknown",
+      "substitutedNeighbor": false
+    }
+  },
+  "componentChecks": [
+    { "name": "assistant launcher and reference answer", "ok": true },
+    { "name": "CSV attach sends only matching rows", "ok": true },
+    { "name": "retry/stop/clear session", "ok": true },
+    { "name": "equipment-aware deep link", "ok": true }
+  ],
+  "notValidated": [
+    "Real Gemini provider credentials, cost, latency, or output quality",
+    "Cloudflare Pages deployment and durable/global rate limiting",
+    "Live Supabase data or operational records",
+    "Automated P&ID topology extraction (vector PDFs are not text-indexed)",
+    "Field verification of supplied line-list completeness"
+  ]
+}

@@ -1,9 +1,63 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import { VitePWA } from "vite-plugin-pwa";
 import path from "path";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { onRequestOptions, onRequestPost } from "./functions/api/ai-agent";
+import { onRequestOptions as searchManualOptions, onRequestPost as searchManualPost } from "./functions/api/search-manual";
 
 const isElectron = process.env.BUILD_TARGET === "electron";
+
+// Dev/preview only: bridge the Cloudflare Pages Function so the assistant works
+// behind the HTTPS preview proxy. Production uses the real Pages Function.
+function assistantApiPlugin(): Plugin {
+  const middleware = async (req: IncomingMessage, res: ServerResponse, next: (error?: unknown) => void) => {
+    const requestUrl = req.url;
+    if (!requestUrl) return next();
+    const isAssistant = requestUrl.startsWith("/api/ai-agent");
+    const isManualSearch = requestUrl.startsWith("/api/search-manual");
+    if (!isAssistant && !isManualSearch) return next();
+    if (req.method !== "POST" && req.method !== "OPTIONS") {
+      res.statusCode = 405;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: "Method not allowed" }));
+      return;
+    }
+    try {
+      const forwardedHost = req.headers["x-forwarded-host"];
+      const host = (Array.isArray(forwardedHost) ? forwardedHost[0] : forwardedHost)?.split(",")[0]?.trim() || req.headers.host || "localhost:8081";
+      const forwardedProto = req.headers["x-forwarded-proto"];
+      const proto = (Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto)?.split(",")[0]?.trim() || "http";
+      const url = new URL(requestUrl, `${proto}://${host}`);
+      const headers = new Headers();
+      for (const [key, value] of Object.entries(req.headers)) {
+        if (value === undefined) continue;
+        if (Array.isArray(value)) value.forEach((item) => headers.append(key, item));
+        else headers.set(key, value);
+      }
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      const request = new Request(url, {
+        method: req.method,
+        headers,
+        body: req.method === "POST" ? Buffer.concat(chunks) : undefined,
+      });
+      const response = isManualSearch
+        ? (req.method === "OPTIONS" ? await searchManualOptions() : await searchManualPost({ request }))
+        : (req.method === "OPTIONS" ? await onRequestOptions({ request }) : await onRequestPost({ request, env: process.env }));
+      res.statusCode = response.status;
+      response.headers.forEach((value, key) => res.setHeader(key, value));
+      res.end(Buffer.from(await response.arrayBuffer()));
+    } catch (error) {
+      next(error);
+    }
+  };
+  return {
+    name: "gnl1z-assistant-api",
+    configureServer(server) { server.middlewares.use(middleware); },
+    configurePreviewServer(server) { server.middlewares.use(middleware); },
+  };
+}
 
 export default defineConfig({
   base: isElectron ? "./" : "/",
@@ -20,6 +74,7 @@ export default defineConfig({
   preview: { host: "0.0.0.0", port: 8081, allowedHosts: [".e2b.app"] },
 
   plugins: [
+    assistantApiPlugin(),
     react(),
     VitePWA({
       registerType: "autoUpdate",

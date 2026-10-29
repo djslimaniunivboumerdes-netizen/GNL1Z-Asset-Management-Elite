@@ -1067,7 +1067,7 @@ function PanelContent({ tag, lang, onPreviewDcs }: { tag: TagDef; lang: string; 
     const prompt = lang === "fr"
       ? `Donne-moi l'analyse QA/QC, les tuyauteries/brides et l'état d'inspection de ${tag.dbTag ?? tag.diag} (${tag.nameFr}).`
       : `Give me the QA/QC analysis, piping/flange specs, and inspection status for ${tag.dbTag ?? tag.diag} (${tag.nameEn}).`;
-    window.dispatchEvent(new CustomEvent("gnl1z:ask-ai", { detail: { prompt } }));
+    window.dispatchEvent(new CustomEvent("gnl1z:ask-ai", { detail: { prompt, equipmentTag: tag.dbTag ?? tag.diag } }));
   };
 
   return (
