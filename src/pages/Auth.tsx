@@ -8,7 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, isSupabaseConfigured } from "@/integrations/supabase/client";
+import { describeAuthFailure } from "@/lib/authErrors";
 import {
   LogIn, ArrowLeft, ArrowRight, Loader2, Mail, KeyRound,
   User, Eye, EyeOff, RefreshCw,
@@ -217,7 +218,7 @@ export default function Auth() {
       } else if (kind === "rate_limit") {
         toast({ title: "Too many attempts", description: "Please wait a moment and try again.", variant: "destructive" });
       } else {
-        toast({ title: "Sign-in failed", description: error.message, variant: "destructive" });
+        toast({ title: "Sign-in failed", description: describeAuthFailure("signin", error.message).description, variant: "destructive" });
       }
       return;
     }
@@ -258,7 +259,7 @@ export default function Auth() {
         setEmailErr("An account with this email already exists");
         setTab("signin");
       } else {
-        toast({ title: "Sign-up failed", description: error.message, variant: "destructive" });
+        toast({ title: "Sign-up failed", description: describeAuthFailure("signup", error.message).description, variant: "destructive" });
       }
       return;
     }
@@ -279,7 +280,8 @@ export default function Auth() {
     // Page will navigate away; only reaches here if signInWithOAuth itself fails
     setBusy(false);
     if (error) {
-      toast({ title: "Google sign-in failed", description: error.message, variant: "destructive" });
+      const failure = describeAuthFailure("google", error.message);
+      toast({ title: failure.title, description: failure.description, variant: "destructive" });
     }
   };
 
@@ -469,10 +471,15 @@ export default function Auth() {
         </div>
 
         {/* Google */}
-        <Button variant="outline" onClick={handleGoogle} disabled={busy} className="w-full gap-2">
+        <Button variant="outline" onClick={handleGoogle} disabled={busy || !isSupabaseConfigured} className="w-full gap-2">
           <GoogleIcon />
           Continue with Google
         </Button>
+        {!isSupabaseConfigured && (
+          <p role="status" className="text-[11px] text-amber-600 dark:text-amber-400 text-center leading-relaxed">
+            Sign-in unavailable: backend credentials are missing (VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY). Email/password sign-in is disabled for the same reason.
+          </p>
+        )}
 
         <p className="mt-5 text-[11px] text-muted-foreground text-center leading-relaxed">
           Browsing equipment is public. Sign in only to log tests or upload photos.
