@@ -42,7 +42,7 @@ For development with hot reload, use `npm run dev` (port 8080).
 1. Read `docs/PRODUCTION_READINESS.md`.
 2. Review backend RLS/roles, storage buckets, backups, and hosting secrets in a staging project.
 3. Complete `docs/ENGINEERING_VALIDATION.md` with the responsible process/inspection/rigging engineers.
-4. Deploy `dist/` plus the `functions/` runtime together if assistant/manual-search APIs are required. Review `docs/AI_ASSISTANT.md` for Expert AI GNL1 boundaries, server-side variables, and rate limiting.
+4. Deploy `dist/` plus the `functions/` runtime together if assistant/manual-search APIs are required. Review `docs/AI_ASSISTANT.md` for Expert AI GNL1 alias normalization, line-list CSV ingestion, source coverage, server-side variables, and rate limiting. Piping counts/sizes are only answered from a supplied line-list CSV; otherwise the assistant reports the coverage gap.
 5. Run live staging acceptance tests before connecting operational users.
 
 The ZIP is a release candidate, not a production certification.

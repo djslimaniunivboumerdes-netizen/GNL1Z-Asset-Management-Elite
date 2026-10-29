@@ -1,0 +1,78 @@
+﻿tag,name,type,unit,section,status,weight_kg,pressure_bar,volume_m3,serial_no,aliases,pid_sheets,dcs_panels,manuals
+7X3-E-03.17,Échangeur (Exchanger) — 7X3-E-03.17,Échangeur (Exchanger),7X3,Utilities,PREVENTIVE,600,0,0,,7X3-E-03.17|E317,x02-3|pid-file-10|pid-file-11,,
+X01-E-501,Condenseur de tête,Échangeur (Exchanger),X01,Décarbonatation,PREVENTIVE,600,8.6,0,35959-6,X01-E-501|E501|101-E501,pid-file-13|pid-file-14,decarbonation-01,S01
+X01-E-502,Rebouilleur de MEA,Échangeur (Exchanger),X01,Décarbonatation,PREVENTIVE,600,7.2,0,35961-6,X01-E-502|E502|101-E502,pid-file-15,decarbonation-01|decarbonation-2,S01
+X01-E-503A,Échangeur MEA Lean/Rich (A),Échangeur (Exchanger),X01,Décarbonatation,PREVENTIVE,600,8.6,0,35962-6,X01-E-503A|E503A|101-E503A,pid-file-14,decarbonation-01|decarbonation-2,S01
+X01-E-503B,Échangeur MEA Lean/Rich (B),Échangeur (Exchanger),X01,Décarbonatation,PREVENTIVE,600,8.6,0,35962-6,X01-E-503B|E503B,pid-file-14,,
+X01-E-504,Feed Gas Pre-Heater,Échangeur (Exchanger),X01,Décarbonatation,PREVENTIVE,600,15.5,0,387704-6,X01-E-504|E504|101-E504,x01-2|pid-file-13|pid-file-43,decarbonation-01|scrubber,S01
+X01-E-505,Échangeur Principal,Échangeur (Exchanger),X01,Décarbonatation,PREVENTIVE,600,15.5,0,35963-6,X01-E-505|E505,pid-file-14|pid-file-15,,
+X01-E-506,Feed Gas Pre-Heater,Échangeur (Exchanger),X01,Décarbonatation,PREVENTIVE,600,15.5,0,387704-6,X01-E-506|E506,x01-2|pid-file-15|pid-file-43,,
+X01-F-501,Fond / Colonne (Vessel/Column) — X01-F-501,Fond / Colonne (Vessel/Column),X01,Décarbonatation,DEROGATION,22950,8.4,27,35959-6,X01-F-501|101-F501|F501,pid-file-14,decarbonation-01|decarbonation-2|general-train,S01
+X01-F-502,Fond / Colonne (Vessel/Column) — X01-F-502,Fond / Colonne (Vessel/Column),X01,Décarbonatation,DEROGATION,147050,81,173,35960-6,X01-F-502|101-F502|F502,x01-2|pid-file-43,decarbonation-01|decarbonation-2|scrubber|general-train|dehydration-1,S01
+X01-G-502,Ballon / Séparateur (Drum/Separator) — X01-G-502,Ballon / Séparateur (Drum/Separator),X01,Décarbonatation,PREVENTIVE,300,8,0,,X01-G-502|G502,pid-file-14,,
+X01-G-507,Flash Drum MEA,Ballon / Séparateur (Drum/Separator),X01,Décarbonatation,PREVENTIVE,300,7.8,0,V-2089-F,X01-G-507|101-G-507|G507|101-G507,x01-1|pid-file-37,decarbonation-01|general-train,S01
+X01-P-501,Pompe / Filtre (Pump/Filter) — X01-P-501,Pompe / Filtre (Pump/Filter),X01,Décarbonatation,PREVENTIVE,150,8,0,,X01-P-501|P501,x01-2|pid-file-43,,
+X01-P-502,Pompe / Filtre (Pump/Filter) — X01-P-502,Pompe / Filtre (Pump/Filter),X01,Décarbonatation,PREVENTIVE,150,8,0,,X01-P-502|P502,x01-2|pid-file-43,,
+X02-E-03.15,Échangeur (Exchanger) — X02-E-03.15,Échangeur (Exchanger),X02,Déshydratation / Utilities,PREVENTIVE,600,0,0,,X02-E-03.15|E0315|102-E03.15|E315,x02-4|pid-file-42,dehydration-2|dehydration-3,S02
+X02-E-03.16,Échangeur (Exchanger) — X02-E-03.16,Échangeur (Exchanger),X02,Déshydratation / Utilities,PREVENTIVE,600,0,0,,X02-E-03.16|E316,x02-3|pid-file-10|pid-file-11,,
+X02-E-15.50,Échangeur (Exchanger) — X02-E-15.50,Échangeur (Exchanger),X02,Déshydratation / Utilities,PREVENTIVE,600,0,0,,X02-E-15.50,,,
+X02-E-15.51,Échangeur (Exchanger) — X02-E-15.51,Échangeur (Exchanger),X02,Déshydratation / Utilities,PREVENTIVE,600,0,0,,X02-E-15.51,,,
+X02-G-03.14,Ballon / Séparateur (Drum/Separator) — X02-G-03.14,Ballon / Séparateur (Drum/Separator),X02,Déshydratation / Utilities,PREVENTIVE,400,0,0,,X02-G-03.14|G0314|102-G03.14|G314,x02-4|pid-file-42,dehydration-2|dehydration-3,S02
+X02-G-07.87,Ballon / Séparateur (Drum/Separator) — X02-G-07.87,Ballon / Séparateur (Drum/Separator),X02,Déshydratation / Utilities,PREVENTIVE,400,0,0,,X02-G-07.87|102-G07.87|G0787|G787,x02-1|pid-file-39,dehydration-1|dehydration-2|scrubber|general-train,S02
+X02-G-304,Ballon / Séparateur (Drum/Separator) — X02-G-304,Ballon / Séparateur (Drum/Separator),X02,Déshydratation / Utilities,PREVENTIVE,400,0,0,,X02-G-304|G304|102-G304,x02-3|pid-file-10|pid-file-11,dehydration-1|scrubber,S02
+X02-P-03.12A,Pompe / Filtre (Pump/Filter) — X02-P-03.12A,Pompe / Filtre (Pump/Filter),X02,Déshydratation / Utilities,PREVENTIVE,150,0,0,,X02-P-03.12A,,,
+X02-P-03.12B,Pompe / Filtre (Pump/Filter) — X02-P-03.12B,Pompe / Filtre (Pump/Filter),X02,Déshydratation / Utilities,PREVENTIVE,150,0,0,,X02-P-03.12B,,,
+X02-P-03.14A,Pompe / Filtre (Pump/Filter) — X02-P-03.14A,Pompe / Filtre (Pump/Filter),X02,Déshydratation / Utilities,PREVENTIVE,150,0,0,,X02-P-03.14A,,,
+X02-P-03.14B,Pompe / Filtre (Pump/Filter) — X02-P-03.14B,Pompe / Filtre (Pump/Filter),X02,Déshydratation / Utilities,PREVENTIVE,150,0,0,,X02-P-03.14B,,,
+X02-R-03.12,Réservoir / Réacteur (Tank/Reactor) — X02-R-03.12,Réservoir / Réacteur (Tank/Reactor),X02,Déshydratation / Utilities,PREVENTIVE,8000,0,0,,X02-R-03.12|102-R03.12|R0312|R312,x02-2|pid-file-44,dehydration-1|dehydration-2|dehydration-3|general-train,S02
+X03-E-05.13,Échangeur (Exchanger) — X03-E-05.13,Échangeur (Exchanger),X03,Propane / Utilities,DEROGATION,600,0,0,,X03-E-05.13|E0513|103-E05.13|E513,x03-1|pid-file-13|pid-file-18,propane-1|propane-2,S03
+X03-E-05.14A,Échangeur (Exchanger) — X03-E-05.14A,Échangeur (Exchanger),X03,Propane / Utilities,DEROGATION,600,0,0,,X03-E-05.14A|E0514A|103-E05.14A|E514A,x03-2|pid-file-19,propane-1|propane-2,S03
+X03-E-05.14B,Échangeur (Exchanger) — X03-E-05.14B,Échangeur (Exchanger),X03,Propane / Utilities,DEROGATION,600,0,0,,X03-E-05.14B|E514B,x03-2|pid-file-19,,
+X03-E-05.15,Échangeur (Exchanger) — X03-E-05.15,Échangeur (Exchanger),X03,Propane / Utilities,PREVENTIVE,600,0,0,,X03-E-05.15|E515,x03-2|pid-file-13|pid-file-19,,
+X03-F-05.16,Fond / Colonne (Vessel/Column) — X03-F-05.16,Fond / Colonne (Vessel/Column),X03,Propane / Utilities,PREVENTIVE,15000,0,0,,X03-F-05.16|F0516|103-F05.16|F516,x03-2|pid-file-19,propane-1|propane-2|propane-3|general-train,S03
+X03-G-07.86,Ballon / Séparateur (Drum/Separator) — X03-G-07.86,Ballon / Séparateur (Drum/Separator),X03,Propane / Utilities,DEROGATION,400,0,0,,X03-G-07.86|G0786|103-G07.86|G786,x03-2|pid-file-19,propane-3,S03
+X04-E-05.21,Échangeur (Exchanger) — X04-E-05.21,Échangeur (Exchanger),X04,Propane / Liquéfaction,PREVENTIVE,600,0,0,,X04-E-05.21|E521,x04-3|pid-file-21,,
+X04-E-05.22,Échangeur (Exchanger) — X04-E-05.22,Échangeur (Exchanger),X04,Propane / Liquéfaction,DEROGATION,600,0,0,,X04-E-05.22|E522,x04-25|pid-file-22,,
+X04-E-05.23,Échangeur (Exchanger) — X04-E-05.23,Échangeur (Exchanger),X04,Propane / Liquéfaction,DEROGATION,600,0,0,,X04-E-05.23|E523,x04-1|pid-file-28,,
+X04-E-05.24,Échangeur (Exchanger) — X04-E-05.24,Échangeur (Exchanger),X04,Propane / Liquéfaction,DEROGATION,600,0,0,,X04-E-05.24|E524,x04-25|pid-file-22,,
+X04-E-05.25A,Échangeur (Exchanger) — X04-E-05.25A,Échangeur (Exchanger),X04,Propane / Liquéfaction,DEROGATION,600,0,0,,X04-E-05.25A|E525A,x04-25|pid-file-22,,
+X04-E-05.25B,Échangeur (Exchanger) — X04-E-05.25B,Échangeur (Exchanger),X04,Propane / Liquéfaction,DEROGATION,600,0,0,,X04-E-05.25B|E525B,x04-25|pid-file-22,,
+X04-E-05.26A,Échangeur (Exchanger) — X04-E-05.26A,Échangeur (Exchanger),X04,Propane / Liquéfaction,DEROGATION,600,0,0,,X04-E-05.26A|E526A,x04-25|pid-file-22,,
+X04-E-05.26B,Échangeur (Exchanger) — X04-E-05.26B,Échangeur (Exchanger),X04,Propane / Liquéfaction,DEROGATION,600,0,0,,X04-E-05.26B|E526B,x04-25|pid-file-22,,
+X04-E-05.40,Échangeur (Exchanger) — X04-E-05.40,Échangeur (Exchanger),X04,Propane / Liquéfaction,DEROGATION,600,0,0,,X04-E-05.40|E540,x04-4|pid-file-24,,
+X04-E-07.13,Échangeur (Exchanger) — X04-E-07.13,Échangeur (Exchanger),X04,Propane / Liquéfaction,PREVENTIVE,600,0,0,,X04-E-07.13|E713,x04-1|pid-file-28,,
+X04-E-07.17,Échangeur (Exchanger) — X04-E-07.17,Échangeur (Exchanger),X04,Propane / Liquéfaction,PREVENTIVE,600,0,0,,X04-E-07.17|E717,x04-1|pid-file-28,,
+X04-E-07.97,Échangeur (Exchanger) — X04-E-07.97,Échangeur (Exchanger),X04,Propane / Liquéfaction,PREVENTIVE,600,0,0,,X04-E-07.97|E797,x04-3|pid-file-21,,
+X04-F-07.11,Fond / Colonne (Vessel/Column) — X04-F-07.11,Fond / Colonne (Vessel/Column),X04,Propane / Liquéfaction,DEROGATION,15000,0,0,,X04-F-07.11|F711,x04-1|pid-file-28,,
+X04-G-07.14,Ballon / Séparateur (Drum/Separator) — X04-G-07.14,Ballon / Séparateur (Drum/Separator),X04,Propane / Liquéfaction,PREVENTIVE,400,0,0,,X04-G-07.14|G714,x04-4|pid-file-24,,
+X04-G-07.85,Ballon / Séparateur (Drum/Separator) — X04-G-07.85,Ballon / Séparateur (Drum/Separator),X04,Propane / Liquéfaction,DEROGATION,400,0,0,,X04-G-07.85|G785,x04-25|pid-file-22,,
+X04-G-07.90,Ballon / Séparateur (Drum/Separator) — X04-G-07.90,Ballon / Séparateur (Drum/Separator),X04,Propane / Liquéfaction,DEROGATION,400,0,0,,X04-G-07.90|G790,x04-25|pid-file-22,,
+X04-G-07.91,Ballon / Séparateur (Drum/Separator) — X04-G-07.91,Ballon / Séparateur (Drum/Separator),X04,Propane / Liquéfaction,DEROGATION,400,0,0,,X04-G-07.91|G0791|104-G07.91|G791,x04-3|pid-file-21,propane-3,S03
+X05-E-05.11,Échangeur (Exchanger) — X05-E-05.11,Échangeur (Exchanger),X05,Propane / Liquéfaction,DEROGATION,600,0,0,,X05-E-05.11|E511,x05-1|pid-file-8|pid-file-16,,
+X05-E-05.12,Échangeur (Exchanger) — X05-E-05.12,Échangeur (Exchanger),X05,Propane / Liquéfaction,DEROGATION,600,0,0,,X05-E-05.12|E512,x05-2|pid-file-8|pid-file-17,,
+X05-G-07.88,Ballon / Séparateur (Drum/Separator) — X05-G-07.88,Ballon / Séparateur (Drum/Separator),X05,Propane / Liquéfaction,DEROGATION,400,0,0,,X05-G-07.88|G0788|105-G07.88|G788,x05-1|pid-file-16,mcr-1|mcr-2,S05
+X05-G-07.89,Ballon / Séparateur (Drum/Separator) — X05-G-07.89,Ballon / Séparateur (Drum/Separator),X05,Propane / Liquéfaction,DEROGATION,400,0,0,,X05-G-07.89|G0789|K05-G07.89|G789,x05-2|pid-file-17,mcr-3,S05
+X06-E-05.30,Échangeur (Exchanger) — X06-E-05.30,Échangeur (Exchanger),X06,Liquéfaction,DEROGATION,600,0,0,,X06-E-05.30|E530,x06-2|pid-file-23,,
+X06-G-07.80,Ballon / Séparateur (Drum/Separator) — X06-G-07.80,Ballon / Séparateur (Drum/Separator),X06,Liquéfaction,DEROGATION,400,0,0,,X06-G-07.80|G780,x06-2|pid-file-23,,
+X06-G-07.83,Ballon / Séparateur (Drum/Separator) — X06-G-07.83,Ballon / Séparateur (Drum/Separator),X06,Liquéfaction,DEROGATION,400,0,0,,X06-G-07.83|G0783|106-G07.83|G783,x06-3|pid-file-38,mcr-1|mcr-2|liquefaction-1,S05
+X07-E-07.22,Échangeur (Exchanger) — X07-E-07.22,Échangeur (Exchanger),X07,Liquéfaction / Fractionnement,PREVENTIVE,600,0,0,,X07-E-07.22,,,
+X07-E-07.23,Échangeur (Exchanger) — X07-E-07.23,Échangeur (Exchanger),X07,Liquéfaction / Fractionnement,PREVENTIVE,600,0,0,,X07-E-07.23|E723,x07-1|x07-1b|x00-21-3|pid-file-25|pid-file-29|pid-file-30,,
+X07-E-07.30,Échangeur (Exchanger) — X07-E-07.30,Échangeur (Exchanger),X07,Liquéfaction / Fractionnement,PREVENTIVE,600,0,0,,X07-E-07.30|E730,x07-1|x07-1b|pid-file-8|pid-file-29|pid-file-30,,
+X07-F-07.21,Fond / Colonne (Vessel/Column) — X07-F-07.21,Fond / Colonne (Vessel/Column),X07,Liquéfaction / Fractionnement,DEROGATION,15000,0,0,,X07-F-07.21|F0721|107-F07.21|F721,x07-1|x07-1b|pid-file-29|pid-file-30,demethanisation|demethanisation-2|general-train,S07
+X07-G-07.24,Ballon / Séparateur (Drum/Separator) — X07-G-07.24,Ballon / Séparateur (Drum/Separator),X07,Liquéfaction / Fractionnement,PREVENTIVE,400,0,0,,X07-G-07.24|G724,x07-1|x07-1b|pid-file-29|pid-file-30,,
+X08-E-07.32,Échangeur (Exchanger) — X08-E-07.32,Échangeur (Exchanger),X08,Liquéfaction / Fractionnement,PREVENTIVE,600,0,0,,X08-E-07.32|E732,x08-1|pid-file-31,,
+X08-E-07.33,Échangeur (Exchanger) — X08-E-07.33,Échangeur (Exchanger),X08,Liquéfaction / Fractionnement,PREVENTIVE,600,0,0,,X08-E-07.33|E733,x08-1|x00-21-3|pid-file-25|pid-file-31,,
+X08-F-07.31,Fond / Colonne (Vessel/Column) — X08-F-07.31,Fond / Colonne (Vessel/Column),X08,Liquéfaction / Fractionnement,DEROGATION,15000,0,0,,X08-F-07.31|F0731|108-F07.31|F731,x08-1|pid-file-31,deethanisation,S08
+X08-G-07.34,Ballon / Séparateur (Drum/Separator) — X08-G-07.34,Ballon / Séparateur (Drum/Separator),X08,Liquéfaction / Fractionnement,PREVENTIVE,400,0,0,,X08-G-07.34|G734,x08-1|pid-file-31,,
+X08-G-07.36,Ballon / Séparateur (Drum/Separator) — X08-G-07.36,Ballon / Séparateur (Drum/Separator),X08,Liquéfaction / Fractionnement,PREVENTIVE,400,0,0,,X08-G-07.36|G736,x08-1|pid-file-31,,
+X09-E-07.42,Échangeur (Exchanger) — X09-E-07.42,Échangeur (Exchanger),X09,Fractionnement,PREVENTIVE,600,0,0,,X09-E-07.42|E742,x09-1|pid-file-8|pid-file-32,,
+X09-E-07.43,Échangeur (Exchanger) — X09-E-07.43,Échangeur (Exchanger),X09,Fractionnement,PREVENTIVE,600,0,0,,X09-E-07.43|E743,x09-1|x00-21-3|pid-file-25|pid-file-32,,
+X09-F-07.41,Fond / Colonne (Vessel/Column) — X09-F-07.41,Fond / Colonne (Vessel/Column),X09,Fractionnement,DEROGATION,15000,0,0,,X09-F-07.41|F0741|109-F07.41|F741,x09-1|pid-file-32,depropanisation,S09
+X09-G-07.44,Ballon / Séparateur (Drum/Separator) — X09-G-07.44,Ballon / Séparateur (Drum/Separator),X09,Fractionnement,PREVENTIVE,400,0,0,,X09-G-07.44|G744,x09-1|pid-file-32,,
+X10-E-07.38,Échangeur (Exchanger) — X10-E-07.38,Échangeur (Exchanger),X10,Fractionnement / Stockage,DEROGATION,600,0,0,,X10-E-07.38|E738,x10-2|x10-2b|pid-file-26|pid-file-27,,
+X10-E-07.39,Échangeur (Exchanger) — X10-E-07.39,Échangeur (Exchanger),X10,Fractionnement / Stockage,PREVENTIVE,600,0,0,,X10-E-07.39|E739,x10-2|x10-2b|pid-file-26|pid-file-27,,
+X10-E-07.52,Échangeur (Exchanger) — X10-E-07.52,Échangeur (Exchanger),X10,Fractionnement / Stockage,PREVENTIVE,600,0,0,,X10-E-07.52|E752,x10-1|pid-file-8|pid-file-33,,
+X10-E-07.53,Échangeur (Exchanger) — X10-E-07.53,Échangeur (Exchanger),X10,Fractionnement / Stockage,PREVENTIVE,600,0,0,,X10-E-07.53|E753,x10-1|x00-21-3|pid-file-25|pid-file-33,,
+X10-E-07.58,Échangeur (Exchanger) — X10-E-07.58,Échangeur (Exchanger),X10,Fractionnement / Stockage,PREVENTIVE,600,0,0,,X10-E-07.58|E758,pid-file-8,,
+X10-F-07.51,Fond / Colonne (Vessel/Column) — X10-F-07.51,Fond / Colonne (Vessel/Column),X10,Fractionnement / Stockage,DEROGATION,15000,0,0,,X10-F-07.51|F0751|110-F07.51|F751,x10-1|pid-file-33,debutanisation,S10
+X10-G-07.54,Ballon / Séparateur (Drum/Separator) — X10-G-07.54,Ballon / Séparateur (Drum/Separator),X10,Fractionnement / Stockage,PREVENTIVE,400,0,0,,X10-G-07.54|G754,x10-1|pid-file-33,,

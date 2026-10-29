@@ -82,6 +82,26 @@ describe("Expert AI GNL1 chat", () => {
     expect(sessionStorage.getItem("gnl1z.expert-ai-gnl1.v1")).toBeNull();
   });
 
+  it("attaches a line-list CSV and sends only matching rows", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ...referenceResponse, verifiedLineList: true, intent: "line_count" }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderChat();
+    fireEvent.click(screen.getByRole("button", { name: "Open Expert AI GNL1" }));
+    const fileInput = screen.getByLabelText(/Attach piping line list CSV/i) as HTMLInputElement;
+    const csvText = "line,from,to,size\nL-1,E501,G502,DN50\nL-2,X01-E-501,P501,2 in\nL-3,F501,G501,DN25\n";
+    const file = new File([csvText], "lines.csv", { type: "text/csv" });
+    Object.defineProperty(file, "text", { value: async () => csvText });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+    await waitFor(() => expect(screen.getByText(/lines\.csv/)).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText(/Ask about an equipment tag/), { target: { value: "How many pipelines for E-501?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+    expect(body.lineList.fileName).toBe("lines.csv");
+    expect(body.lineList.rows).toHaveLength(2);
+    expect(body.lineList.rows.every((row: { from: string; to: string }) => /501/.test(row.from) || /501/.test(row.to))).toBe(true);
+  });
+
   it("accepts an equipment-aware deep link event", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify(referenceResponse), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);

@@ -50,7 +50,7 @@ describe("bounded assistant endpoint", () => {
   });
   it("returns unavailable instead of inventing an answer when the provider fails", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("no", { status: 500 })));
-    const response = await onRequestPost({ request: request({ prompt: "unique provider failure question", contextData: context }), env: { GEMINI_API_KEY: "test-key" } });
+    const response = await onRequestPost({ request: request({ prompt: "Review X01-E-501 provider failure", contextData: context }), env: { GEMINI_API_KEY: "test-key" } });
     expect(response.status).toBe(503);
   });
   it("returns source cards for equipment, manuals, DCS panels, and simulated alarms", async () => {
@@ -97,7 +97,7 @@ describe("bounded assistant endpoint", () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "ok" }] } }] }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const history = Array.from({ length: 10 }, (_, index) => ({ role: index % 2 ? "assistant" : "user", text: `message ${index}` }));
-    const response = await onRequestPost({ request: request({ prompt: "unique history question", contextData: context, history }), env: { GEMINI_API_KEY: "test-key" } });
+    const response = await onRequestPost({ request: request({ prompt: "Review X01-E-501 history", contextData: context, history }), env: { GEMINI_API_KEY: "test-key" } });
     expect(response.status).toBe(200);
     const init = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1];
     const payload = JSON.parse(String(init.body));
@@ -127,7 +127,32 @@ describe("bounded assistant endpoint", () => {
   });
   it("returns 503 when the provider returns an empty answer", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "  " }] } }] }), { status: 200 })));
-    const response = await onRequestPost({ request: request({ prompt: "unique empty answer question", contextData: context }), env: { GEMINI_API_KEY: "test-key" } });
+    const response = await onRequestPost({ request: request({ prompt: "Review X01-E-501 empty answer", contextData: context }), env: { GEMINI_API_KEY: "test-key" } });
     expect(response.status).toBe(503);
+  });
+  it("returns a coverage gap, not an invented count, for E520 pipeline questions", async () => {
+    const response = await onRequestPost({ request: request({ prompt: "How many pipelines associated with E-520?" }), env: {} });
+    const data = await response.json();
+    expect(response.status).toBe(200);
+    expect(data.mode).toBe("reference");
+    expect(data.verifiedLineList).toBe(false);
+    expect(data.response).toContain("Piping answer not yet verified");
+    expect(data.sources.some((source: { kind: string }) => source.kind === "pid")).toBe(true);
+  });
+  it("answers line-size questions from supplied CSV rows even when a provider key exists", async () => {
+    const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+    const response = await onRequestPost({ request: request({
+      prompt: "What piping sizes are connected to E-501?",
+      lineList: { fileName: "lines.csv", rows: [
+        { row: 2, lineNumber: "L-1", from: "E501", to: "G502", size: "DN 80" },
+        { row: 3, lineNumber: "L-2", from: "P501", to: "X01-E-501", size: "3 inch" },
+      ] },
+    }), env: { GEMINI_API_KEY: "test-key" } });
+    const data = await response.json();
+    expect(response.status).toBe(200);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(data.verifiedLineList).toBe(true);
+    expect(data.response).toContain("DN 80");
+    expect(data.response).toContain('3"');
   });
 });

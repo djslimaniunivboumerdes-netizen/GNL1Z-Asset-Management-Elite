@@ -102,6 +102,7 @@ describe("assistant history and session storage", () => {
   it("suggests tag-aware follow-ups", () => {
     const withTag = followUpPrompts(message({ role: "assistant", sources: [{ kind: "equipment", id: "X01-E-501", title: "Condenser" }] }), "en");
     expect(withTag[0]).toContain("X01-E-501");
+    expect(withTag[0]).toMatch(/pipelines/i);
     expect(followUpPrompts(message({ role: "assistant" }), "fr")[0]).toContain("alarmes simulées");
   });
 });

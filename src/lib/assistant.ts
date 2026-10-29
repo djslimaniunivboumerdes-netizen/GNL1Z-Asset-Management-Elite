@@ -13,7 +13,7 @@ export type AssistantMode = "reference" | "ai" | "cache";
 export type AssistantMessageStatus = "complete" | "loading" | "error" | "cancelled";
 
 export interface AssistantSource {
-  kind: "equipment" | "dcs" | "manual" | "simulation";
+  kind: "equipment" | "dcs" | "manual" | "simulation" | "pid" | "csv";
   id: string;
   title: string;
   href?: string;
@@ -31,6 +31,8 @@ export interface AssistantMessage {
   sources?: AssistantSource[];
   cached?: boolean;
   latencyMs?: number;
+  resolvedTags?: Array<{ input: string; tag: string }>;
+  verifiedLineList?: boolean;
 }
 
 export interface AssistantContext {
@@ -155,11 +157,11 @@ export function loadAssistantSession(now = Date.now()): AssistantMessage[] {
         prompt: typeof message.prompt === "string" ? message.prompt.slice(0, ASSISTANT_MAX_PROMPT) : undefined,
         mode: message.mode === "ai" || message.mode === "cache" || message.mode === "reference" ? message.mode : undefined,
         cached: message.cached === true,
-        sources: Array.isArray(message.sources) ? message.sources.slice(0, 6).flatMap((source): AssistantSource[] => {
+        sources: Array.isArray(message.sources) ? message.sources.slice(0, 10).flatMap((source): AssistantSource[] => {
           if (!source || typeof source !== "object") return [];
           const value = source as Record<string, unknown>;
           if (typeof value.id !== "string" || typeof value.title !== "string") return [];
-          const kind = value.kind === "dcs" || value.kind === "manual" || value.kind === "simulation" ? value.kind : "equipment";
+          const kind = value.kind === "dcs" || value.kind === "manual" || value.kind === "simulation" || value.kind === "pid" || value.kind === "csv" ? value.kind : "equipment";
           const href = typeof value.href === "string" && value.href.startsWith("/") && !value.href.startsWith("//") ? value.href.slice(0, 300) : undefined;
           return [{ kind, id: String(value.id).slice(0, 80), title: value.title.slice(0, 160), href, detail: typeof value.detail === "string" ? value.detail.slice(0, 160) : undefined }];
         }) : undefined,
@@ -190,10 +192,10 @@ export function followUpPrompts(message: AssistantMessage, lang: "en" | "fr"): s
   const tag = message.sources?.find((source) => source.kind === "equipment")?.id;
   if (lang === "fr") {
     return tag
-      ? [`Quelle est l'échéance de ${tag} ?`, `Quelles données manquent pour ${tag} ?`, `Quels manuels se rapportent à ${tag} ?`]
+      ? [`Combien de tuyauteries sont associées à ${tag} ?`, `Quels diamètres sont raccordés à ${tag} ?`, `Quels P&ID et manuels se rapportent à ${tag} ?`]
       : ["Afficher les alarmes simulées", "Quels manuels sont disponibles ?", "Comment citer un repère équipement ?"];
   }
   return tag
-    ? [`What is the schedule for ${tag}?`, `What data is missing for ${tag}?`, `Which manuals relate to ${tag}?`]
+    ? [`How many pipelines are associated with ${tag}?`, `What pipe sizes are connected to ${tag}?`, `Which P&IDs and manuals relate to ${tag}?`]
     : ["Show simulated alarms", "Which manuals are available?", "How do I reference an equipment tag?"];
 }

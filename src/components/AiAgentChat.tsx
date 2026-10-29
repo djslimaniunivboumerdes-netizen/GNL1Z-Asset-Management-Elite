@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { AlertTriangle, ArrowDown, BookOpen, Check, Copy, Cpu, ExternalLink, Loader2, MessageSquare, RotateCcw, Send, ShieldCheck, Sparkles, Square, Trash2, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, BookOpen, Check, Copy, Cpu, Database, ExternalLink, FileImage, FileSpreadsheet, Loader2, MessageSquare, Paperclip, RotateCcw, Send, ShieldCheck, Sparkles, Square, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useI18n } from "@/contexts/I18nContext";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,8 @@ import {
   type AssistantMode,
   type AssistantSource,
 } from "@/lib/assistant";
+import { parseLineListCsv, queryLineList, type LineListDataset } from "@/lib/lineListCsv";
+import { detectIntent, resolvePrompt } from "@/lib/assistantKnowledge";
 
 const REQUEST_TIMEOUT_MS = 25_000;
 const newId = () => typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -31,7 +33,7 @@ function modeLabel(mode: AssistantMode | undefined, lang: "en" | "fr"): string {
 
 function SourceCards({ sources, lang, onNavigate }: { sources: AssistantSource[]; lang: "en" | "fr"; onNavigate: () => void }) {
   if (!sources.length) return null;
-  const icon = (kind: AssistantSource["kind"]) => kind === "manual" ? <BookOpen className="h-3.5 w-3.5" /> : kind === "simulation" ? <AlertTriangle className="h-3.5 w-3.5" /> : kind === "dcs" ? <Cpu className="h-3.5 w-3.5" /> : <ShieldCheck className="h-3.5 w-3.5" />;
+  const icon = (kind: AssistantSource["kind"]) => kind === "manual" ? <BookOpen className="h-3.5 w-3.5" /> : kind === "simulation" ? <AlertTriangle className="h-3.5 w-3.5" /> : kind === "dcs" ? <Cpu className="h-3.5 w-3.5" /> : kind === "pid" ? <FileImage className="h-3.5 w-3.5" /> : kind === "csv" ? <FileSpreadsheet className="h-3.5 w-3.5" /> : <ShieldCheck className="h-3.5 w-3.5" />;
   return (
     <div className="mt-3 space-y-1.5">
       <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">{lang === "fr" ? "Références fournies" : "Supplied references"}</p>
@@ -39,9 +41,12 @@ function SourceCards({ sources, lang, onNavigate }: { sources: AssistantSource[]
         {sources.map((source) => {
           const content = <>{icon(source.kind)}<span className="max-w-[220px] truncate">{source.title}</span>{source.href ? <ExternalLink className="h-3 w-3 opacity-60" /> : null}</>;
           const className = "inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/25 bg-cyan-500/5 px-2 py-1 text-[11px] font-mono text-cyan-700 transition-colors hover:border-cyan-500/50 hover:bg-cyan-500/10 dark:text-cyan-300";
+          const key = `${source.kind}-${source.id}`;
+          const staticFile = source.href && (source.href.startsWith("/pids/") || source.href.startsWith("/data/"));
+          if (source.href && staticFile) return <a key={key} href={source.href} target="_blank" rel="noopener noreferrer" className={className} title={source.detail ?? source.title}>{content}</a>;
           return source.href
-            ? <Link key={`${source.kind}-${source.id}`} to={source.href} onClick={onNavigate} className={className} title={source.detail ?? source.title}>{content}</Link>
-            : <span key={`${source.kind}-${source.id}`} className={className} title={source.detail ?? source.title}>{content}</span>;
+            ? <Link key={key} to={source.href} onClick={onNavigate} className={className} title={source.detail ?? source.title}>{content}</Link>
+            : <span key={key} className={className} title={source.detail ?? source.title}>{content}</span>;
         })}
       </div>
     </div>
@@ -60,6 +65,9 @@ export function AiAgentChat() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [showJump, setShowJump] = useState(false);
+  const [lineList, setLineList] = useState<LineListDataset | null>(null);
+  const [attaching, setAttaching] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const controllerRef = useRef<AbortController | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -130,17 +138,57 @@ export function AiAgentChat() {
         import("@/data"), import("@/data/dcs_panels"), import("@/data/manuals"), import("@/lib/alarmStore"),
       ]);
       const explicitTag = options?.equipmentTag ?? contextTag;
-      const matched = selectRelevantEquipment(prompt, EQUIPMENT, explicitTag);
-      const tag = explicitTag ?? matched[0]?.tag ?? null;
+      const resolution = resolvePrompt(prompt, explicitTag);
+      const resolvedRecord = resolution.status === "resolved" ? resolution.matches[0]?.record : null;
+      const tag = resolvedRecord?.tag ?? explicitTag ?? selectRelevantEquipment(prompt, EQUIPMENT, explicitTag)[0]?.tag ?? null;
       const contextData = buildAssistantContext({ prompt, lang, equipment: EQUIPMENT, panels: DCS_PANELS, manuals: MANUALS, alarms: getActiveAlarms(), currentTag: tag });
       const history = assistantHistory(messagesRef.current.filter((message) => message.id !== assistantId), 6);
+      const intent = detectIntent(prompt);
+
+      // Only matching line-list rows leave the browser; the raw CSV is not uploaded.
+      let lineListPayload: { fileName: string; rows: LineListDataset["rows"]; warnings: string[] } | null = null;
+      if (lineList && resolvedRecord) {
+        const result = queryLineList(lineList, resolvedRecord.tag, (candidate) => {
+          const candidateResolution = resolvePrompt(candidate);
+          return candidateResolution.status === "resolved" && candidateResolution.matches.some((match) => match.record.tag === resolvedRecord.tag);
+        });
+        lineListPayload = { fileName: lineList.fileName, rows: result.matchedRows.slice(0, 200), warnings: result.warnings };
+      }
+
+      // Retrieve manual text only when relevant; failures degrade to title references.
+      let manualEvidence: Array<{ id: string; title: string; snippets: string[] }> = [];
+      const manualIds = resolvedRecord && "manualIds" in resolvedRecord ? resolvedRecord.manualIds : [];
+      if ((intent === "manual" || intent === "equipment") && manualIds.length) {
+        const selectedManuals = MANUALS.filter((manual) => manualIds.includes(manual.id)).slice(0, 5);
+        if (selectedManuals.length) {
+          try {
+            const manualController = new AbortController();
+            const manualTimeout = setTimeout(() => manualController.abort(), 8000);
+            const abortWithParent = () => manualController.abort();
+            controller.signal.addEventListener("abort", abortWithParent);
+            const manualResponse = await fetch("/api/search-manual", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ query: resolution.status === "resolved" ? resolution.matches[0].alias : prompt.slice(0, 200), manuals: selectedManuals.map((manual) => ({ id: manual.id, title: lang === "fr" ? manual.title_fr : manual.title_en, driveId: manual.drive_id })) }),
+              signal: manualController.signal,
+            });
+            clearTimeout(manualTimeout);
+            controller.signal.removeEventListener("abort", abortWithParent);
+            if (manualResponse.ok) {
+              const manualData = await manualResponse.json() as { results?: Array<{ id: string; title: string; snippets: string[] }> };
+              manualEvidence = (manualData.results ?? []).slice(0, 3).map((hit) => ({ id: hit.id, title: hit.title, snippets: (hit.snippets ?? []).slice(0, 2) }));
+            }
+          } catch { /* Manual search is optional evidence, not a hard failure. */ }
+        }
+      }
+
       const response = await fetch("/api/ai-agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, lang, contextData, history }),
+        body: JSON.stringify({ prompt, lang, contextData, history, lineList: lineListPayload, manualEvidence }),
         signal: controller.signal,
       });
-      const data = await response.json().catch(() => ({})) as { response?: unknown; mode?: unknown; cached?: unknown; sources?: unknown; error?: unknown };
+      const data = await response.json().catch(() => ({})) as { response?: unknown; mode?: unknown; cached?: unknown; sources?: unknown; error?: unknown; resolution?: { status?: string; tags?: Array<{ input: string; tag: string }> }; verifiedLineList?: unknown };
       if (!response.ok) {
         if (response.status === 429) {
           const wait = response.headers.get("Retry-After");
@@ -150,10 +198,12 @@ export function AiAgentChat() {
       }
       if (typeof data.response !== "string" || !data.response.trim()) throw new Error(L("The assistant returned an empty response.", "L'assistant a renvoyé une réponse vide."));
       const mode: AssistantMode = data.mode === "ai" || data.mode === "cache" ? data.mode : "reference";
-      const sources = Array.isArray(data.sources) ? data.sources.filter((source): source is AssistantSource => !!source && typeof source === "object" && typeof (source as AssistantSource).id === "string" && typeof (source as AssistantSource).title === "string").slice(0, 6) : [];
+      const sources = Array.isArray(data.sources) ? data.sources.filter((source): source is AssistantSource => !!source && typeof source === "object" && typeof (source as AssistantSource).id === "string" && typeof (source as AssistantSource).title === "string").slice(0, 10) : [];
       const complete: AssistantMessage = {
         id: assistantId, role: "assistant", text: data.response, createdAt: new Date().toISOString(), status: "complete", prompt,
         mode, cached: data.cached === true, sources, latencyMs: Math.round(performance.now() - started),
+        resolvedTags: data.resolution?.status === "resolved" ? data.resolution.tags ?? [] : [],
+        verifiedLineList: data.verifiedLineList === true,
       };
       setMessages((prev) => prev.map((message) => message.id === assistantId ? complete : message));
       setFollowUps(followUpPrompts(complete, lang));
@@ -171,7 +221,7 @@ export function AiAgentChat() {
       setBusy(false);
       setTimeout(() => inputRef.current?.focus(), 0);
     }
-  }, [contextTag, lang, L]);
+  }, [contextTag, lang, L, lineList]);
 
   useEffect(() => { sendRef.current = (prompt, options) => { void send(prompt, options); }; }, [send]);
 
@@ -192,11 +242,29 @@ export function AiAgentChat() {
     return () => window.removeEventListener("gnl1z:ask-ai", handler);
   }, [L]);
 
+  const attachLineList = async (file: File) => {
+    if (file.size > 256 * 1024) { toast.error(L("CSV is larger than 256 KB. Split it or export only the relevant lines.", "Le CSV dépasse 256 Ko. Découpez-le ou exportez uniquement les lignes pertinentes.")); return; }
+    if (!/\.(csv|tsv|txt)$/i.test(file.name)) { toast.error(L("Please attach a CSV, TSV, or text line list.", "Veuillez joindre une liste de lignes CSV, TSV ou texte.")); return; }
+    setAttaching(true);
+    try {
+      const dataset = parseLineListCsv(await file.text(), file.name);
+      setLineList(dataset);
+      toast.success(L(`Loaded ${dataset.rowCount} line-list rows from ${file.name}.`, `${dataset.rowCount} lignes chargées depuis ${file.name}.`));
+      if (dataset.warnings.length) toast.warning(dataset.warnings[0]);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : L("Could not parse the line list.", "Impossible d'analyser la liste de lignes."));
+    } finally {
+      setAttaching(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
   const clearSession = () => {
     controllerRef.current?.abort();
     setMessages([]);
     setInput("");
     setFollowUps([]);
+    setLineList(null);
     setConfirmClear(false);
     clearAssistantSession();
     toast.success(L("Chat session cleared.", "Session de discussion effacée."));
@@ -298,6 +366,7 @@ export function AiAgentChat() {
                     <p className="font-mono text-sm font-bold">{ASSISTANT_NAME}</p>
                     <p className="mx-auto mt-1 max-w-[300px] text-xs leading-relaxed text-muted-foreground">{L("Ask about an equipment tag, test schedule, simulated alarm, DCS panel, or manual. Answers cite the supplied register data.", "Posez une question sur un repère d'équipement, une échéance d'essai, une alarme simulée, un panneau DCS ou un manuel. Les réponses citent les données du registre fournies.")}</p>
                   </div>
+                  <p className="flex items-center justify-center gap-1.5 text-[10px] font-mono text-muted-foreground"><Database className="h-3 w-3" />{L("77 register records · 44 P&ID files · 23 DCS panels · 23 manuals", "77 fiches registre · 44 fichiers P&ID · 23 panneaux DCS · 23 manuels")}</p>
                   <div className="grid w-full gap-2">
                     {chips.map((chip) => (
                       <button key={chip} type="button" onClick={() => sendRef.current(chip)} className="rounded-xl border border-border bg-secondary/50 px-3 py-2 text-left text-xs transition-colors hover:border-cyan-500/40 hover:bg-cyan-500/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">{chip}</button>
@@ -323,6 +392,8 @@ export function AiAgentChat() {
                         <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] font-mono text-muted-foreground">
                           {message.status === "complete" && (
                             <>
+                              {message.resolvedTags?.filter((item) => item.input !== item.tag).map((item) => <span key={`${item.input}-${item.tag}`} className="rounded border border-cyan-500/30 bg-cyan-500/5 px-1.5 py-0.5 text-cyan-700 dark:text-cyan-300">{item.input} → {item.tag}</span>)}
+                              {message.verifiedLineList && <span className="rounded border border-emerald-500/30 bg-emerald-500/5 px-1.5 py-0.5 text-emerald-700 dark:text-emerald-300">{L("CSV verified", "CSV vérifié")}</span>}
                               <span className="rounded border border-border px-1.5 py-0.5">{modeLabel(message.mode, lang)}</span>
                               {typeof message.latencyMs === "number" && message.latencyMs > 0 && <span>{(message.latencyMs / 1000).toFixed(1)}s</span>}
                               <button type="button" onClick={() => void copyAnswer(message)} className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:text-foreground" aria-label={L("Copy answer", "Copier la réponse")}>
@@ -360,6 +431,20 @@ export function AiAgentChat() {
           </div>
 
           <footer className="border-t border-border bg-card/80 px-3 pb-3 pt-2">
+            <input ref={fileRef} type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values" className="hidden" aria-label={L("Attach piping line list CSV", "Joindre un CSV de liste de lignes")} onChange={(event) => { const file = event.target.files?.[0]; if (file) void attachLineList(file); }} />
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <Button type="button" variant="outline" size="sm" className="h-7 rounded-lg px-2 text-[11px]" disabled={attaching || busy} onClick={() => fileRef.current?.click()}>
+                {attaching ? <Loader2 className="h-3 w-3 animate-spin" /> : <Paperclip className="h-3 w-3" />}
+                {L("Attach line list CSV", "Joindre CSV de lignes")}
+              </Button>
+              {lineList && (
+                <span className="inline-flex max-w-[220px] items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-2 py-1 text-[11px] text-emerald-700 dark:text-emerald-300">
+                  <FileSpreadsheet className="h-3 w-3 shrink-0" /><span className="truncate">{lineList.fileName} · {lineList.rowCount} {L("rows", "lignes")}</span>
+                  <button type="button" onClick={() => setLineList(null)} className="ml-1 rounded p-0.5 hover:bg-emerald-500/10" aria-label={L("Remove line list", "Retirer la liste de lignes")}><X className="h-3 w-3" /></button>
+                </span>
+              )}
+              <a href="/data/gnl1z_equipment_register.csv" download className="ml-auto text-[10px] font-mono text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">{L("Register CSV", "CSV registre")}</a>
+            </div>
             <div className="flex items-end gap-2">
               <label htmlFor="expert-ai-gnl1-input" className="sr-only">{t("askAiPlaceholder")}</label>
               <textarea

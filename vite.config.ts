@@ -4,6 +4,7 @@ import { VitePWA } from "vite-plugin-pwa";
 import path from "path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { onRequestOptions, onRequestPost } from "./functions/api/ai-agent";
+import { onRequestOptions as searchManualOptions, onRequestPost as searchManualPost } from "./functions/api/search-manual";
 
 const isElectron = process.env.BUILD_TARGET === "electron";
 
@@ -11,7 +12,11 @@ const isElectron = process.env.BUILD_TARGET === "electron";
 // behind the HTTPS preview proxy. Production uses the real Pages Function.
 function assistantApiPlugin(): Plugin {
   const middleware = async (req: IncomingMessage, res: ServerResponse, next: (error?: unknown) => void) => {
-    if (!req.url?.startsWith("/api/ai-agent")) return next();
+    const requestUrl = req.url;
+    if (!requestUrl) return next();
+    const isAssistant = requestUrl.startsWith("/api/ai-agent");
+    const isManualSearch = requestUrl.startsWith("/api/search-manual");
+    if (!isAssistant && !isManualSearch) return next();
     if (req.method !== "POST" && req.method !== "OPTIONS") {
       res.statusCode = 405;
       res.setHeader("Content-Type", "application/json");
@@ -23,7 +28,7 @@ function assistantApiPlugin(): Plugin {
       const host = (Array.isArray(forwardedHost) ? forwardedHost[0] : forwardedHost)?.split(",")[0]?.trim() || req.headers.host || "localhost:8081";
       const forwardedProto = req.headers["x-forwarded-proto"];
       const proto = (Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto)?.split(",")[0]?.trim() || "http";
-      const url = new URL(req.url, `${proto}://${host}`);
+      const url = new URL(requestUrl, `${proto}://${host}`);
       const headers = new Headers();
       for (const [key, value] of Object.entries(req.headers)) {
         if (value === undefined) continue;
@@ -37,9 +42,9 @@ function assistantApiPlugin(): Plugin {
         headers,
         body: req.method === "POST" ? Buffer.concat(chunks) : undefined,
       });
-      const response = req.method === "OPTIONS"
-        ? await onRequestOptions({ request })
-        : await onRequestPost({ request, env: process.env });
+      const response = isManualSearch
+        ? (req.method === "OPTIONS" ? await searchManualOptions() : await searchManualPost({ request }))
+        : (req.method === "OPTIONS" ? await onRequestOptions({ request }) : await onRequestPost({ request, env: process.env }));
       res.statusCode = response.status;
       response.headers.forEach((value, key) => res.setHeader(key, value));
       res.end(Buffer.from(await response.arrayBuffer()));
