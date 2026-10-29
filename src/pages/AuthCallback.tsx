@@ -9,7 +9,21 @@ import { useNavigate } from "react-router-dom";
 import { Loader2, CheckCircle2, XCircle } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
+import { describeAuthFailure } from "@/lib/authErrors";
 import sonatrachLogo from "@/assets/sonatrach-logo.png";
+
+// OAuth failures arrive as ?error=…&error_description=… (Google denied,
+// redirect_uri_mismatch, provider disabled at authorize time, …).
+function readCallbackError(): string | null {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const error = params.get("error_description") || params.get("error_code") || params.get("error");
+    if (!error) return null;
+    return decodeURIComponent(error.replace(/\+/g, " "));
+  } catch {
+    return null;
+  }
+}
 
 export default function AuthCallback() {
   const { user, loading } = useAuth();
@@ -33,10 +47,11 @@ export default function AuthCallback() {
         });
         navigate("/", { replace: true });
       } else {
+        const callbackError = readCallbackError();
+        const failure = describeAuthFailure("callback", callbackError ?? "Sign-in did not complete.");
         toast({
-          title: "Sign-in failed",
-          description:
-            "Could not complete sign-in. Please try again or use email + password.",
+          title: failure.title,
+          description: callbackError ? failure.description : "Could not complete sign-in. Please try again or use email + password.",
           variant: "destructive",
         });
         navigate("/auth", { replace: true });

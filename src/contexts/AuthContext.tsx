@@ -57,6 +57,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   // ── Email + password sign-in ──────────────────────────────────────────────
   const signIn: AuthContextType["signIn"] = async (email, password) => {
+    if (!isSupabaseConfigured) {
+      return { error: new Error("Supabase is not configured (missing VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY).") };
+    }
     const { error } = await supabase.auth.signInWithPassword({
       email: email.trim(),
       password,
@@ -66,6 +69,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   // ── Email sign-up ─────────────────────────────────────────────────────────
   const signUp: AuthContextType["signUp"] = async (email, password, fullName) => {
+    if (!isSupabaseConfigured) {
+      return { error: new Error("Supabase is not configured (missing VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY).") };
+    }
     const { error } = await supabase.auth.signUp({
       email: email.trim(),
       password,
@@ -81,6 +87,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   // Redirects to /auth/callback so we can show a proper loading screen and
   // welcome toast instead of landing silently on the dashboard.
   const signInWithGoogle: AuthContextType["signInWithGoogle"] = async () => {
+    if (!isSupabaseConfigured) {
+      return { error: new Error("Supabase is not configured (missing VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY).") };
+    }
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {

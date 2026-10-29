@@ -41,6 +41,18 @@ Status: **enhanced release candidate**. The front end, offline behavior, and pro
 - Complete bilingual review of all technical strings and units.
 - Design-system documentation, component gallery, and visual regression tests.
 
+## Google sign-in ("Continue with Google") — setup checklist
+
+The sign-in flow itself is wired end-to-end in the app (PKCE `signInWithOAuth` → `/auth/callback` code exchange → dashboard). For it to succeed, **all** of the following must hold — as of 2026-10-29 the live failure was item 1:
+
+1. **Project active.** The configured project (`gdkqetzkhgllwbpmqmux`, client-safe URL in `.env` / Pages env) must not be paused — a paused project has *no active services*, so every auth call (Google **and** email/password) fails with a fetch error. Restore it in the Supabase dashboard (Project → Settings → General → Restore).
+2. **Google provider enabled.** Authentication → Providers → Google — already enabled on this project (Google Cloud OAuth client with authorized redirect `https://<project-ref>.supabase.co/auth/v1/callback`).
+3. **Redirect allow-list.** Authentication → URL Configuration must contain the exact callback of every origin used: `https://*.gnl1z-asset-management-elite.pages.dev/auth/callback`, the custom domain if any, and for local/preview testing `http://localhost:8081/**` and the Arena preview host (`https://8081-*.e2b.app/**`). `site_url` should point at the production origin.
+4. **Client env.** Local `.env`: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`. Cloudflare Pages → Settings → Environment variables: the same two (plus optional `VITE_APP_URL`). Without them the app disables sign-in and says so instead of failing cryptically.
+5. **Verify.** Signed-in state must survive a hard reload; a denied Google consent returns to `/auth/callback?error=access_denied`, which the app now surfaces verbatim with an actionable hint.
+
+Failure messages are mapped to these exact remedies by `src/lib/authErrors.ts` (covered by `src/test/authErrors.test.ts`).
+
 ## Deployment note
 
 The included CI validates only. No automatic deployment or release workflow is included because hosting credentials, backend approval, and change-control requirements must be configured by the owner.
