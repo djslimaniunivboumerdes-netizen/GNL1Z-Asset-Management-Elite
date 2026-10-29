@@ -12,7 +12,7 @@ import { useI18n } from "@/contexts/I18nContext";
 import { supabase } from "@/integrations/supabase/client";
 import { idb, type PendingLog } from "@/lib/db";
 import { flushQueue } from "@/lib/sync";
-import { parseDateOnly } from "@/lib/scheduleDates";
+import { mayAdvancePassedSchedule, parseDateOnly } from "@/lib/scheduleDates";
 import { toast } from "@/hooks/use-toast";
 import NotFound from "./NotFound";
 
@@ -74,6 +74,15 @@ export default function LogTest() {
       if (insertError) throw insertError;
       // Failed and pending tests must never clear an existing overdue obligation.
       if (result === "PASS") {
+        const { data: current, error: readError } = await supabase.from("equipment_test_dates")
+          .select("last_tested").eq("tag", eq.tag).maybeSingle();
+        if (readError) throw readError;
+        if (!mayAdvancePassedSchedule(current?.last_tested, testDate)) {
+          await queryClient.invalidateQueries({ queryKey: ["maintenance-schedule"] });
+          toast({ title: L("Test saved — newer schedule retained", "Essai enregistré — échéance plus récente conservée"), description: L("A newer passed test already exists. This historical record did not change the current due date.", "Un essai réussi plus récent existe déjà. Cet enregistrement historique n'a pas modifié l'échéance actuelle.") });
+          navigate(`/equipment/${encodeURIComponent(eq.tag)}`);
+          return;
+        }
         const { error: scheduleError } = await supabase.from("equipment_test_dates").upsert({
           tag: eq.tag, last_tested: testDate, next_test_due: nextDue, updated_at: new Date().toISOString(),
         }, { onConflict: "tag" });

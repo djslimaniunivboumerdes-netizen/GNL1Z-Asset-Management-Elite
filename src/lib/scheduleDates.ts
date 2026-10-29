@@ -30,3 +30,11 @@ export function calcStatus(daysLeft: number | null): ScheduleStatus {
   if (daysLeft <= 30) return "DUE_SOON";
   return "OK";
 }
+
+/** A historical PASS may be recorded, but must not roll back a newer passed test. */
+export function mayAdvancePassedSchedule(currentLast: string | null | undefined, testDate: string): boolean {
+  const next = parseDateOnly(testDate);
+  if (!next) return false;
+  const current = parseDateOnly(currentLast);
+  return !current || current.getTime() <= next.getTime();
+}

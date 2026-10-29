@@ -2,8 +2,9 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 
-afterEach(() => { cleanup(); localStorage.clear(); });
+afterEach(() => { cleanup(); if (typeof localStorage !== "undefined") localStorage.clear(); });
 
+if (typeof window !== "undefined") {
 Object.defineProperty(window, "matchMedia", {
   writable: true,
   value: (query: string) => ({
@@ -20,7 +21,9 @@ class ResizeObserverStub {
   disconnect() {}
 }
 vi.stubGlobal("ResizeObserver", ResizeObserverStub);
-Element.prototype.scrollIntoView = vi.fn();
-if (!window.crypto.randomUUID) {
+if (typeof Element !== "undefined") Element.prototype.scrollIntoView = vi.fn();
+if (typeof window !== "undefined" && !window.crypto.randomUUID) {
   Object.defineProperty(window.crypto, "randomUUID", { value: () => `test-${Math.random().toString(36).slice(2)}-${Date.now()}` });
+}
+
 }

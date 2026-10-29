@@ -1,4 +1,5 @@
 import { idb, type PendingLog, type PendingUpload } from "./db";
+import { mayAdvancePassedSchedule } from "./scheduleDates";
 import { supabase, isSupabaseConfigured } from "@/integrations/supabase/client";
 
 let running = false;
@@ -34,7 +35,7 @@ export async function flushQueue(): Promise<{ logs: number; uploads: number; err
             .select("last_tested").eq("tag", log.tag).maybeSingle();
           if (readError) throw new Error(readError.message);
           // A queued historical test must not roll back a more recent passed test.
-          if (!current?.last_tested || current.last_tested <= log.test_date) {
+          if (mayAdvancePassedSchedule(current?.last_tested, log.test_date)) {
             const { error: scheduleError } = await supabase.from("equipment_test_dates").upsert({
               tag: log.tag, last_tested: log.test_date, next_test_due, updated_at: new Date().toISOString(),
             }, { onConflict: "tag" });

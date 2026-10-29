@@ -188,6 +188,9 @@ export default function EquipmentDetail() {
         </TabsContent>
 
         <TabsContent value="lifting" className="mt-6 space-y-6">
+          <div role="note" className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs leading-relaxed text-amber-800 dark:text-amber-200">
+            {lang === "en" ? "Screening guidance only — not an approved lift plan. Verify mass, centre of gravity, rigging geometry, sling angles, crane chart at the actual radius/configuration, ground bearing and site lift procedures before any lift." : "Orientation uniquement — ne constitue pas un plan de levage approuvé. Vérifier la masse, le centre de gravité, la géométrie du gréement, les angles d'élingage, l'abaque de grue au rayon/configuration réel, la portance du sol et les procédures de levage du site avant tout levage."}
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <BigStat label={t("weight")} value={`${eq.technical.weight_kg} kg`} />
             <BigStat label={t("safetyLoad")} value={`${safety} kg`} accent />
@@ -211,11 +214,11 @@ export default function EquipmentDetail() {
                   <div className="text-3xl font-extrabold text-foreground font-mono">{shackle.wll_t} t</div>
                 </div>
                 <div className="col-span-2 text-xs text-muted-foreground border-t border-border pt-4 font-mono">
-                  {lang === "en" ? `Calculated from ${eq.technical.weight_kg} kg × 1.5 safety factor = ${(safety / 1000).toFixed(2)} t. Crosby G-209 reference.` : `Calculé à partir de ${eq.technical.weight_kg} kg × 1.5 de facteur de sécurité = ${(safety / 1000).toFixed(2)} t. Référence Crosby G-209.`}
+                  {lang === "en" ? `Calculated from ${eq.technical.weight_kg} kg × 1.5 safety factor = ${safety != null ? (safety / 1000).toFixed(2) : "—"} t. Crosby G-209 reference; verify manufacturer WLL and rigging geometry.` : `Calculé à partir de ${eq.technical.weight_kg} kg × 1.5 de facteur de sécurité = ${safety != null ? (safety / 1000).toFixed(2) : "—"} t. Référence Crosby G-209 ; vérifier la CMU du fabricant et la géométrie du gréement.`}
                 </div>
               </div>
             ) : (
-              <EmptyState message={lang === "en" ? "No mass recorded — shackle cannot be sized." : "Masse non enregistrée — la manille ne peut être calculée."} />
+              <EmptyState message={lang === "en" ? "No valid mass recorded, or the screening load is outside the reference table — obtain an approved rigging study." : "Masse valide non enregistrée ou charge hors tableau — demander une étude de gréement approuvée."} />
             )}
           </div>
 
@@ -244,7 +247,7 @@ export default function EquipmentDetail() {
                 </div>
               </div>
             ) : (
-              <EmptyState message={lang === "en" ? "No mass recorded — crane cannot be sized." : "Masse non enregistrée — la grue ne peut être calculée."} />
+              <EmptyState message={lang === "en" ? "No valid mass recorded, or no configured fleet class passes this screening check — an engineered lift plan is required." : "Masse valide non enregistrée ou aucune classe de la flotte ne passe ce contrôle — un plan de levage étudié est requis."} />
             )}
           </div>
         </TabsContent>
@@ -258,7 +261,7 @@ export default function EquipmentDetail() {
               <h3 className="text-xl font-bold text-foreground tracking-tight">{t("insulationReq")}</h3>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <BigStat label={lang === "en" ? "Status" : "Statut"} value={insulation.required ? (lang === "en" ? "Required" : "Requis") : (lang === "en" ? "Not required" : "Non requis")} accent={insulation.required} />
+              <BigStat label={lang === "en" ? "Status" : "Statut"} value={insulation.dataMissing ? (lang === "en" ? "Not assessed" : "Non évalué") : insulation.required ? (lang === "en" ? "Review required" : "À vérifier") : (lang === "en" ? "Ambient band" : "Plage ambiante")} accent={insulation.required && !insulation.dataMissing} />
               <BigStat label={lang === "en" ? "Thickness" : "Épaisseur"} value={insulation.thickness_mm ? `${insulation.thickness_mm} mm` : "—"} />
               <BigStat label={lang === "en" ? "Material" : "Matériau"} value={insulation.material} />
             </div>
@@ -266,7 +269,7 @@ export default function EquipmentDetail() {
               <span className="font-bold text-foreground">{lang === "en" ? "Rationale: " : "Explication : "}</span>{insulation.rationale}
             </div>
             <div className="mt-4 text-xs text-muted-foreground font-mono bg-background p-4 rounded-xl border border-border">
-              {lang === "en" ? "Equipment type:" : "Type d'équipement :"} {eq.type.code} ({eq.type.name})
+              {lang === "en" ? "Screening only. Confirm the approved insulation specification, vapour barrier, personnel protection and operating envelope. Equipment type:" : "Orientation uniquement. Confirmer la spécification d'isolation approuvée, le pare-vapeur, la protection du personnel et l'enveloppe de fonctionnement. Type d'équipement :"} {eq.type.code} ({eq.type.name})
             </div>
           </div>
         </TabsContent>
@@ -556,7 +559,7 @@ function EngineeringJudgmentTab({ judgment, lang, tag }: { judgment: ReturnType<
       <div className="flex flex-col md:flex-row gap-4">
         <div className={`flex-1 border rounded-3xl p-6 backdrop-blur-sm shadow-xl ${rs.bg} ${rs.border}`}>
           <div className="text-xs uppercase tracking-widest text-muted-foreground mb-2 font-mono font-bold flex items-center gap-2">
-            <AlertOctagon className="h-4 w-4" /> {L("Risk Tier", "Niveau de Risque")}
+            <AlertOctagon className="h-4 w-4" /> {L("Review priority", "Priorité de revue")}
           </div>
           <div className={`text-4xl font-extrabold font-mono tracking-tight ${rs.text}`}>{judgment.riskTier}</div>
         </div>

@@ -1,4 +1,6 @@
-// Industrial engineering helpers: bolt→wrench, shackle sizing, insulation rules, CSV export.
+// Industrial engineering helpers: bolt→wrench, screening-only lifting/insulation guidance, CSV export.
+// These helpers do not replace an approved lift plan, rigging study, insulation specification,
+// manufacturer chart, or site procedure. Missing inputs must never produce a sized recommendation.
 
 // Standard bolt → hex wrench across-flats lookup (imperial inches preferred).
 // Metric bolt sizes are mapped to the closest equivalent inch wrench.
@@ -114,22 +116,17 @@ export interface CraneRec {
 const CRANE_FLEET: number[] = [12, 24, 35, 54, 74, 100];
 
 export function recommendCrane(massKg: number): CraneRec | null {
-  if (!massKg || massKg <= 0) return null;
-  const liftT = (massKg * 1.5) / 1000; // 1.5× safety factor on hook load
-  // Working at ~70% of crane chart to allow boom radius / rigging weight
+  if (!Number.isFinite(massKg) || massKg <= 0) return null;
+  const liftT = (massKg * 1.5) / 1000; // screening allowance, not an approved rigging load
   const required = liftT / 0.7;
   const pick = CRANE_FLEET.find((c) => c >= required);
-  if (!pick) {
-    return {
-      capacity_t: 100,
-      label: '100+ Tonne mobile crane / Grue mobile 100+ T',
-      rationale: `Hook load ${liftT.toFixed(1)} t (1.5× SF) exceeds 74 T at 70% chart utilisation — use 100+ T crawler/all-terrain.`,
-    };
-  }
+  // Never suggest "100+ T" as if it were a validated capacity. Outside the
+  // configured fleet, a competent person must prepare an engineered lift plan.
+  if (!pick) return null;
   return {
     capacity_t: pick,
-    label: `${pick} Tonne mobile crane / Grue mobile ${pick} T`,
-    rationale: `Hook load ${liftT.toFixed(1)} t (mass × 1.5 SF) within ${pick} T crane chart at 70% utilisation (~${(pick * 0.7).toFixed(1)} t available).`,
+    label: `${pick} Tonne fleet candidate / Candidat flotte ${pick} T`,
+    rationale: `Screening only: ${liftT.toFixed(1)} t allowance (mass × 1.5) at 70% utilisation points to the ${pick} T fleet class. Verify the actual crane chart at radius/configuration, rigging weight, centre of gravity, ground bearing and the approved lift plan before selection.`,
   };
 }
 
@@ -152,41 +149,45 @@ const SHACKLE_TABLE: Array<{ size: string; wll_t: number }> = [
 ];
 
 export function suggestShackle(massKg: number): { size: string; wll_t: number } | null {
-  if (!massKg || massKg <= 0) return null;
-  const safety = (massKg * 1.5) / 1000; // tons
-  return SHACKLE_TABLE.find((s) => s.wll_t >= safety) ?? SHACKLE_TABLE[SHACKLE_TABLE.length - 1];
+  if (!Number.isFinite(massKg) || massKg <= 0) return null;
+  const safety = (massKg * 1.5) / 1000; // screening allowance, not sling tension
+  // Do not cap an overload at the largest table row. Multi-leg geometry,
+  // angles, bending, temperature and manufacturer WLL require a rigging study.
+  return SHACKLE_TABLE.find((s) => s.wll_t >= safety) ?? null;
 }
 
-export function safetyLoadKg(massKg: number) {
+export function safetyLoadKg(massKg: number): number | null {
+  if (!Number.isFinite(massKg) || massKg <= 0) return null;
   return Math.round(massKg * 1.5);
 }
 
-// Insulation logic by equipment type + (optional) temperature
-export function insulationRecommendation(typeCode: string, tempC?: number): {
+// Insulation screening by verified service temperature. Equipment type alone
+// is not a safe basis for deciding whether insulation is required.
+export interface InsulationRecommendation {
   required: boolean;
   thickness_mm: number;
   material: string;
   rationale: string;
-} {
-  const t = tempC ?? estimateTempByType(typeCode);
-  if (t >= 60 && t < 150) return { required: true, thickness_mm: 50, material: "Mineral wool + aluminium jacket", rationale: `Hot service ${t}°C — personnel protection.` };
-  if (t >= 150 && t < 350) return { required: true, thickness_mm: 80, material: "Rock wool + stainless steel jacket", rationale: `High-temp service ${t}°C — heat conservation.` };
-  if (t >= 350) return { required: true, thickness_mm: 120, material: "Calcium silicate + SS jacket", rationale: `Very high temp ${t}°C — refractory insulation.` };
-  if (t < 0 && t > -50) return { required: true, thickness_mm: 60, material: "Cellular glass (Foamglas)", rationale: `Cold service ${t}°C — anti-condensation.` };
-  if (t <= -50) return { required: true, thickness_mm: 150, material: "Polyurethane + vapour barrier", rationale: `Cryogenic ${t}°C — LNG-grade insulation.` };
-  return { required: false, thickness_mm: 0, material: "—", rationale: "Ambient service, no insulation required." };
+  dataMissing: boolean;
 }
 
-function estimateTempByType(code: string): number {
-  // Rough defaults so insulation tab still gives guidance when no temp recorded.
-  switch (code) {
-    case "E": return 120; // exchanger
-    case "F": return 90;  // column
-    case "G": return 40;  // separator
-    case "P": return 60;  // pump
-    case "K": return 80;  // compressor
-    default: return 25;
+export function insulationRecommendation(_typeCode: string, tempC?: number | null): InsulationRecommendation {
+  if (tempC == null || !Number.isFinite(tempC)) {
+    return {
+      required: false,
+      thickness_mm: 0,
+      material: "Not assessed / Non évalué",
+      rationale: "No verified service temperature is recorded. Do not infer insulation requirements from equipment type; confirm the approved insulation specification and operating envelope.",
+      dataMissing: true,
+    };
   }
+  const t = tempC;
+  if (t >= 60 && t < 150) return { required: true, thickness_mm: 50, material: "Mineral wool + aluminium jacket", rationale: `Hot service ${t}°C — screening candidate for personnel protection; verify the approved specification.`, dataMissing: false };
+  if (t >= 150 && t < 350) return { required: true, thickness_mm: 80, material: "Rock wool + stainless steel jacket", rationale: `High-temperature service ${t}°C — screening candidate for heat conservation; verify the approved specification.`, dataMissing: false };
+  if (t >= 350) return { required: true, thickness_mm: 120, material: "Calcium silicate + SS jacket", rationale: `Very high temperature ${t}°C — screening candidate only; verify refractory/insulation design and approved specification.`, dataMissing: false };
+  if (t < 0 && t > -50) return { required: true, thickness_mm: 60, material: "Cellular glass (Foamglas)", rationale: `Cold service ${t}°C — screening candidate for anti-condensation; verify vapour-barrier design.`, dataMissing: false };
+  if (t <= -50) return { required: true, thickness_mm: 150, material: "Polyurethane + vapour barrier", rationale: `Cryogenic service ${t}°C — screening candidate only; verify LNG-grade insulation, vapour barrier and contract specification.`, dataMissing: false };
+  return { required: false, thickness_mm: 0, material: "—", rationale: `Recorded service ${t}°C is in the ambient screening band. Confirm personnel-protection, condensation and process requirements before concluding insulation is unnecessary.`, dataMissing: false };
 }
 
 // CSV export. Protect spreadsheet consumers from formula injection as well as

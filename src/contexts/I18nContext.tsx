@@ -107,11 +107,11 @@ const DICT: Dict = {
   aiAssistant: { en: "GNL1Z AI Expert", fr: "Expert IA GNL1Z" },
   aiSubtitle: { en: "Industrial Asset Knowledgebase & Prediction Engine", fr: "Base de Connaissances & Moteur de Prédiction" },
   askAiPlaceholder: { en: "Ask about equipment, tests, failure predictions, tools...", fr: "Poser une question sur l'équipement, les essais, pannes, outils..." },
-  predictChip: { en: "Predict next failing asset", fr: "Prédire la prochaine défaillance" },
-  suggestToolsChip: { en: "Suggest tools for X01-E-501", fr: "Outils pour X01-E-501" },
-  analyzeAlertsChip: { en: "Analyze recent fast alerts", fr: "Analyser les alertes récentes" },
-  judgmentChip: { en: "Full engineering judgment for X01-F-502", fr: "Jugement d'ingénierie complet pour X01-F-502" },
-  expertThinking: { en: "AI Expert is analyzing plant data...", fr: "L'Expert IA analyse les données de l'usine..." },
+  predictChip: { en: "Review schedule for X01-E-501", fr: "Consulter l'échéance de X01-E-501" },
+  suggestToolsChip: { en: "Reference tools for X01-E-501", fr: "Outils de référence pour X01-E-501" },
+  analyzeAlertsChip: { en: "Show simulated alarms", fr: "Afficher les alarmes simulées" },
+  judgmentChip: { en: "Review record for X01-F-502", fr: "Consulter le dossier de X01-F-502" },
+  expertThinking: { en: "Checking the supplied reference data...", fr: "Consultation des données de référence fournies..." },
 };
 
 interface I18nContextValue {

@@ -30,9 +30,9 @@ export function AiAgentChat() {
     {
       id: "1",
       sender: "ai",
-      text: lang === "fr" 
-        ? "Bonjour ! Je suis l'Expert IA GNL1Z. Je supervise la totalité de nos 77 équipements, 713 pièces de rechange, les schémas P&ID, les manuels opératoires (S01-S15) et le moteur d'apprentissage Supabase. Demandez-moi de prédire des défaillances, suggérer des outils ou analyser les alertes."
-        : "Hello! I am the GNL1Z AI Expert. I supervise all 77 assets, 713 spare parts, P&ID drawings, operational manuals (S01-S15), and the Supabase AI learning engine. Ask me to predict failures, suggest maintenance tools, or analyze alerts."
+      text: lang === "fr"
+        ? "Bonjour. Je peux consulter les données statiques du registre GNL1Z et les alarmes simulées affichées. Je ne dispose pas de télémétrie temps réel et je ne remplace pas les procédures approuvées, un plan d'essai ou un plan de levage. Posez une question sur un repère équipement."
+        : "Hello. I can look up static GNL1Z register data and the simulated alarms shown on screen. I do not have real-time telemetry and I do not replace approved procedures, a test plan, or a lift plan. Ask about an equipment tag."
     }
   ]);
   const [input, setInput] = useState("");
@@ -72,39 +72,38 @@ export function AiAgentChat() {
     setLoading(true);
 
     try {
-      // 🚀 MASTER ENHANCEMENT: Send the ENTIRE equipment database, DCS panels list, AND Operational Manuals list
-      // so Gemini has 100% complete, unclipped plant context!
+      // Data minimization: send full records only for likely matches; otherwise
+      // send a compact static catalog. Manual drive IDs and the full spare-parts
+      // catalog are not needed by the assistant and are not transmitted.
+      const q = prompt.toLowerCase();
+      const matched = EQUIPMENT.filter((eq) => q.includes(eq.tag.toLowerCase()) || q.includes(eq.name.toLowerCase()) || q.includes(eq.unit.toLowerCase())).slice(0, 5);
+      const compactCatalog = EQUIPMENT.map((eq) => ({
+        tag: eq.tag, name: eq.name, unit: eq.unit, section: eq.section, type: eq.type, testing_status: eq.testing_status,
+        technical: { pressure_bar: eq.technical.pressure_bar, weight_kg: eq.technical.weight_kg, volume_m3: eq.technical.volume_m3, temperature_c: eq.technical.temperature_c },
+        maintenance: { last_tested: eq.maintenance.last_tested, next_test_due: eq.maintenance.next_test_due },
+      }));
       const completePlantContext = {
         facility: "Sonatrach GL1/Z Arzew LNG Complex",
         process: "AP-C3MR™ Liquefaction",
-        totalEquipmentCount: EQUIPMENT.length,
-        masterEquipmentCatalog: EQUIPMENT,
-        dcsPanelsList: DCS_PANELS.map(p => ({ id: p.id, title: p.title_en, section: p.section, tags: p.tags, relatedEquipment: p.related_tags })),
-        operationalManualsList: MANUALS.map(m => ({ id: m.id, title: m.title_en, category: m.category, driveId: m.drive_id })),
-        // 🚀 Live simulated Smart Process Flow safety alarm feed — lets the AI answer
-        // "any active alarms?" with whatever is actually flashing on-screen right now.
-        activeSafetyAlarms: liveAlarms.map(a => ({
-          tag: a.dbTag || a.tag,
-          name: a.nameEn,
-          unit: a.unit,
-          instrument: a.instrument,
-          kind: a.kind,
-          severity: a.severity,
-          description: a.descriptionEn,
-          recommendedAction: a.actionEn,
-          triggeredAt: new Date(a.triggeredAt).toISOString(),
+        masterEquipmentCatalog: matched.length ? matched : compactCatalog,
+        dcsPanelsList: DCS_PANELS.map(p => ({ id: p.id, title: p.title_en, section: p.section, tags: p.tags })),
+        operationalManualsList: MANUALS.map(m => ({ id: m.id, title: m.title_en, category: m.category })),
+        simulatedSafetyAlarms: liveAlarms.map(a => ({
+          tag: a.dbTag || a.tag, name: a.nameEn, unit: a.unit, severity: a.severity,
+          description: a.descriptionEn, simulated: true,
         }))
       };
-
-      const res = await fetch("/api/ai-agent", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt,
-          lang,
-          contextData: completePlantContext
-        })
-      });
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 25_000);
+      let res: Response;
+      try {
+        res = await fetch("/api/ai-agent", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({ prompt: prompt.slice(0, 2000), lang, contextData: completePlantContext })
+        });
+      } finally { window.clearTimeout(timeout); }
 
       if (res.ok) {
         const data = await res.json();
@@ -136,10 +135,10 @@ export function AiAgentChat() {
   }
 
   const quickChips = [
-    { key: "predictChip", promptEn: "Predict next failing asset", promptFr: "Prédire la prochaine défaillance", icon: AlertTriangle },
-    { key: "suggestToolsChip", promptEn: "Suggest tools for X01-E-501", promptFr: "Outils pour X01-E-501", icon: Hammer },
-    { key: "analyzeAlertsChip", promptEn: "Analyze recent fast alerts", promptFr: "Analyser les alertes récentes", icon: ShieldAlert },
-    { key: "judgmentChip", promptEn: "Full engineering judgment for X01-F-502", promptFr: "Jugement d'ingénierie complet pour X01-F-502", icon: Sparkles },
+    { key: "predictChip", promptEn: "Review schedule for X01-E-501", promptFr: "Consulter l'échéance de X01-E-501", icon: AlertTriangle },
+    { key: "suggestToolsChip", promptEn: "Reference tools for X01-E-501", promptFr: "Outils de référence pour X01-E-501", icon: Hammer },
+    { key: "analyzeAlertsChip", promptEn: "Show simulated alarms", promptFr: "Afficher les alarmes simulées", icon: ShieldAlert },
+    { key: "judgmentChip", promptEn: "Review record for X01-F-502", promptFr: "Consulter le dossier de X01-F-502", icon: Sparkles },
   ];
 
   return (
@@ -170,7 +169,7 @@ export function AiAgentChat() {
                 <h3 className="text-base font-bold text-foreground tracking-tight flex items-center gap-2 truncate">
                   {t("aiAssistant")}
                   <span className="text-[10px] font-mono bg-cyan-500/10 border border-cyan-500/30 text-cyan-700 dark:text-cyan-400 px-2.5 py-0.5 rounded-full animate-pulse shadow-inner">
-                    P&ID + MANUALS
+                    STATIC REFERENCE
                   </span>
                 </h3>
                 <p className="text-[11px] text-muted-foreground font-mono truncate">{t("aiSubtitle")}</p>
@@ -246,6 +245,8 @@ export function AiAgentChat() {
           <div className="p-4 bg-background border-t border-border flex items-center gap-3">
             <input
               type="text"
+              maxLength={2000}
+              aria-label={t("askAiPlaceholder")}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSend()}
@@ -254,6 +255,7 @@ export function AiAgentChat() {
             />
             <button
               onClick={() => handleSend()}
+              aria-label={lang === "fr" ? "Envoyer la question" : "Send question"}
               disabled={loading || !input.trim()}
               className={`p-3.5 rounded-xl transition-all flex items-center justify-center shrink-0 cursor-pointer shadow-lg ${
                 loading || !input.trim()

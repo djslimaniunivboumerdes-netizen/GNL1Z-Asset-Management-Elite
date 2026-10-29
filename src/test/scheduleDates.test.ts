@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addIntervalDays, calcStatus, daysUntilDate, parseDateOnly } from "@/lib/scheduleDates";
+import { addIntervalDays, calcStatus, daysUntilDate, mayAdvancePassedSchedule, parseDateOnly } from "@/lib/scheduleDates";
 
 describe("calendar-date scheduling", () => {
   it("rejects impossible and non-calendar dates", () => {
@@ -26,5 +26,15 @@ describe("calendar-date scheduling", () => {
     expect(addIntervalDays("2028-02-28", 1)).toBe("2028-02-29");
     expect(addIntervalDays("2026-12-31", 1)).toBe("2027-01-01");
     expect(addIntervalDays("2026-01-01", 0)).toBeNull();
+  });
+});
+
+describe("passed-test schedule advancement", () => {
+  it("allows newer or same-day passed tests but not historical rollback", () => {
+    expect(mayAdvancePassedSchedule(null, "2026-10-01")).toBe(true);
+    expect(mayAdvancePassedSchedule("2026-09-01", "2026-10-01")).toBe(true);
+    expect(mayAdvancePassedSchedule("2026-10-01", "2026-10-01")).toBe(true);
+    expect(mayAdvancePassedSchedule("2026-10-20", "2026-10-01")).toBe(false);
+    expect(mayAdvancePassedSchedule("2026-10-20", "invalid")).toBe(false);
   });
 });
