@@ -80,6 +80,7 @@ const DICT: Dict = {
   /* ─── EXPANDED TRANSLATION KEYS ─── */
   flow: { en: "Process Flow", fr: "Schéma Procédé" },
   smartFlow: { en: "Smart Flow", fr: "Schéma Intelligent" },
+  pidLibrary: { en: "P&ID Library", fr: "Bibliothèque P&ID" },
   testSchedule: { en: "Test Schedule", fr: "Calendrier d'Essais" },
   fastAlerts: { en: "Fast Alerts", fr: "Alertes Rapides" },
   alerts: { en: "Alert Center", fr: "Centre d'alertes" },

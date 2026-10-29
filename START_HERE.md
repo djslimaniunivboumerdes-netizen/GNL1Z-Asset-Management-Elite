@@ -5,6 +5,7 @@ This ZIP contains the enhanced GNL1Z Asset Management Elite source and a tested 
 ## Included
 
 - React/TypeScript/Vite source, Supabase migrations, Cloudflare Pages Functions, Electron entry files, and PWA configuration
+- P&ID Library at `/pids` — 30 catalogued sheets with local vector PDF links where available (map generated into `src/data/pid_sheet_files.json`)
 - `dist/` — production build generated from this source
 - `docs/` — enhancement notes, production-readiness checklist, engineering validation checklist, and validation report
 - `.env.example` — safe environment template

@@ -20,6 +20,7 @@ const DcsDirectory = lazy(() => import("./pages/DcsDirectory"));
 const DcsDetail = lazy(() => import("./pages/DcsDetail"));
 const Manuals = lazy(() => import("./pages/Manuals"));
 const SmartFlow = lazy(() => import("./pages/SmartFlow"));
+const PIDViewer = lazy(() => import("./pages/PIDViewer"));
 const News = lazy(() => import("./pages/News"));
 const Author = lazy(() => import("./pages/Author"));
 const DownloadPage = lazy(() => import("./pages/DownloadPage"));
@@ -55,8 +56,9 @@ const App = () => (
                     <Route path="/dcs" element={<DcsDirectory />} />
                     <Route path="/dcs/:id" element={<DcsDetail />} />
                     <Route path="/manuals" element={<Manuals />} />
-                    <Route path="/flow" element={<SmartFlow />} />
-                    <Route path="/smart-flow" element={<SmartFlow />} />
+                  <Route path="/flow" element={<SmartFlow />} />
+                  <Route path="/smart-flow" element={<SmartFlow />} />
+                  <Route path="/pids" element={<PIDViewer />} />
                     <Route path="/news" element={<News />} />
                     <Route path="/author" element={<Author />} />
                     <Route path="/auth" element={<Auth />} />

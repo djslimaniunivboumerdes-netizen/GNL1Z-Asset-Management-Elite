@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, Database, CalendarClock, ShieldAlert, Cpu, BookOpen } from "lucide-react";
+import { Search, Database, CalendarClock, ShieldAlert, Cpu, BookOpen, FileText } from "lucide-react";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Button } from "@/components/ui/button";
 import { EQUIPMENT } from "@/data";
@@ -32,6 +32,7 @@ export function GlobalSearch() {
     { key: "testSchedule", path: "/test-schedule", icon: CalendarClock },
     { key: "fastAlerts", path: "/alerts", icon: ShieldAlert },
     { key: "dcs", path: "/dcs", icon: Cpu },
+    { key: "pidLibrary", path: "/pids", icon: FileText },
     { key: "manuals", path: "/manuals", icon: BookOpen },
   ];
   const visiblePages = pages.filter((page) => `${t(page.key)} ${page.key} ${page.path}`.toLowerCase().includes(query.trim().toLowerCase()));

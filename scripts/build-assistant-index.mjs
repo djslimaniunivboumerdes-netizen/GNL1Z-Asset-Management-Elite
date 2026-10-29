@@ -92,6 +92,9 @@ for (const sheet of pidSheets) {
   sheet.localFile = exact ? `/pids/${exact}` : null;
   sheet.textIndexed = false;
 }
+// Small lookup for the P&ID Library UI: sheet id → locally served vector PDF.
+const pidSheetFiles = Object.fromEntries(pidSheets.filter((sheet) => sheet.localFile).map((sheet) => [sheet.id, sheet.localFile]));
+fs.writeFileSync(path.join(root, "src/data/pid_sheet_files.json"), `${JSON.stringify(pidSheetFiles, null, 2)}\n`);
 
 const pidFiles = pdfFiles.map((file, index) => {
   const tokens = [...pdfTokens(file)];

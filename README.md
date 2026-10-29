@@ -37,7 +37,11 @@ Optional Cloudflare Pages Function variables:
 - `GEMINI_MODEL` — optional provider model override.
 - `ASSISTANT_RATE_LIMIT_PER_MIN` — optional per-IP assistant rate limit, default `20`.
 
-See [docs/AI_ASSISTANT.md](docs/AI_ASSISTANT.md) for equipment alias normalization, source coverage, line-list CSV ingestion, data boundaries, modes, API contract, and the local preview bridge. Rebuild the knowledge index with `node scripts/build-assistant-index.mjs` after changing register/DCS/manual/P&ID references.
+See [docs/AI_ASSISTANT.md](docs/AI_ASSISTANT.md) for equipment alias normalization, source coverage, line-list CSV ingestion, data boundaries, modes, API contract, and the local preview bridge. Rebuild the knowledge index with `node scripts/build-assistant-index.mjs` after changing register/DCS/manual/P&ID references (this also regenerates `src/data/pid_sheet_files.json`, the P&ID Library's sheet→local-PDF map).
+
+## P&ID Library
+
+The **P&ID Library** (`/pids`, sidebar + ⌘K search) catalogs all 30 GNL1Z P&ID sheets by process section. Sheets matched to locally served vector PDFs (28/30) open instantly and work offline; the remainder preview through Google Drive. Revision status must still be verified against approved site drawings before field use.
 
 ## Deployment
 
