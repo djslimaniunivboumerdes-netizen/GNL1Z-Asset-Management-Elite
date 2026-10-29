@@ -9,9 +9,9 @@ import { GNL1Z_ASSETS } from "@/utils/assets";
 
 /* ─── ABOUT PAGE BACKGROUND SLIDES ─── */
 const aboutSlides = [
-  { tag: "Complex Overview", image: GNL1Z_ASSETS.units.unit40 },
-  { tag: "Liquefaction Train", image: GNL1Z_ASSETS.units.unit30 },
-  { tag: "Cryogenic Storage", image: GNL1Z_ASSETS.units.unit50 }
+  { tag: "Complex Overview", ...GNL1Z_ASSETS.unitImages.unit40 },
+  { tag: "Liquefaction Train", ...GNL1Z_ASSETS.unitImages.unit30 },
+  { tag: "Cryogenic Storage", ...GNL1Z_ASSETS.unitImages.unit50 }
 ] as const;
 
 export default function About() {
@@ -19,6 +19,7 @@ export default function About() {
   const [slideIndex, setSlideIndex] = useState(0);
 
   useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const sequence = setInterval(() => {
       setSlideIndex((prev) => (prev + 1) % aboutSlides.length);
     }, 6000);
@@ -33,15 +34,7 @@ export default function About() {
         
         {/* Layer 1: High-Definition Background Photos */}
         <div className="absolute inset-0 z-0 pointer-events-none">
-          {aboutSlides.map((slide, idx) => (
-            <img
-              key={idx}
-              src={slide.image}
-              alt={slide.tag}
-              className={`absolute inset-0 w-full h-full object-cover object-center transition-opacity duration-1000 ease-in-out
-                ${idx === slideIndex ? "opacity-80 scale-100" : "opacity-0 scale-105"}`}
-            />
-          ))}
+          <img key={slideIndex} src={aboutSlides[slideIndex].src} srcSet={aboutSlides[slideIndex].srcSet} sizes="100vw" alt={aboutSlides[slideIndex].tag} decoding="async" className="absolute inset-0 h-full w-full object-cover object-center opacity-80" />
         </div>
 
         {/* Layer 2: Scrim — left text area readable, image visible everywhere */}
@@ -52,7 +45,7 @@ export default function About() {
         {/* Layer 3: Typography Header */}
         <div className="relative px-4 md:px-10 py-16 max-w-7xl mx-auto z-20 w-full">
           <div className="max-w-3xl space-y-4">
-            <div className="text-[10px] uppercase tracking-[0.25em] text-orange-500 font-mono font-bold">
+            <div className="text-[10px] uppercase tracking-[0.25em] text-orange-300 font-mono font-bold">
               {lang === "en" ? "/ COMPLEX OVERVIEW & SPECS" : "/ APPERÇU DU COMPLEXE & SPECS"}
             </div>
             <h1 className="text-4xl md:text-6xl font-display font-extrabold text-white tracking-tight leading-none">
@@ -129,7 +122,7 @@ export default function About() {
         {/* Operational Focus */}
         <div className="bg-card border border-border rounded-xl p-6 flex flex-col justify-between hover:border-amber-500/30 transition-all duration-200">
           <div className="space-y-4">
-            <div className="p-2.5 rounded-lg bg-amber-500/10 text-amber-400 w-fit border border-amber-500/20">
+            <div className="p-2.5 rounded-lg bg-amber-500/10 text-amber-700 dark:text-amber-400 w-fit border border-amber-500/20">
               <Factory className="h-5 w-5" />
             </div>
             <h3 className="text-xl font-display font-bold tracking-tight">
@@ -149,7 +142,7 @@ export default function About() {
         {/* Asset Integrity Standards */}
         <div className="bg-card border border-border rounded-xl p-6 flex flex-col justify-between hover:border-emerald-500/30 transition-all duration-200">
           <div className="space-y-4">
-            <div className="p-2.5 rounded-lg bg-emerald-500/10 text-emerald-400 w-fit border border-emerald-500/20">
+            <div className="p-2.5 rounded-lg bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 w-fit border border-emerald-500/20">
               <ShieldCheck className="h-5 w-5" />
             </div>
             <h3 className="text-xl font-display font-bold tracking-tight">
@@ -185,7 +178,7 @@ function TechCard({ icon: Icon, title, value, sub }: TechCardProps) {
         <Icon className="h-3.5 w-3.5 text-orange-500" />
         {title}
       </div>
-      <div className="text-2xl md:text-3xl font-display font-extrabold text-white tracking-tight">
+      <div className="text-2xl md:text-3xl font-display font-extrabold text-foreground tracking-tight">
         {value}
       </div>
       <p className="text-xs text-muted-foreground mt-2 font-normal leading-normal">

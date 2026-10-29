@@ -1,23 +1,24 @@
-import { createClient } from '@supabase/supabase-js';
-import type { Database } from './types';
+import { createClient } from "@supabase/supabase-js";
+import type { Database } from "./types";
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? '';
-const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? '';
+const url = (import.meta.env.VITE_SUPABASE_URL ?? "").trim();
+const key = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? "").trim();
+export const isSupabaseConfigured = Boolean(
+  url && key && !url.includes("placeholder") && key !== "placeholder",
+);
 
-if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
-  console.warn('[GNL1Z] Supabase env vars not set — offline/local mode active.');
-}
-
+// A syntactically valid local-only client keeps the equipment register usable
+// without credentials. Callers guard backend operations with the flag above.
 export const supabase = createClient<Database>(
-  SUPABASE_URL || 'https://placeholder.supabase.co',
-  SUPABASE_PUBLISHABLE_KEY || 'placeholder',
+  isSupabaseConfigured ? url : "https://placeholder.supabase.co",
+  isSupabaseConfigured ? key : "public-anonymous-key",
   {
     auth: {
-      storage: typeof window !== 'undefined' ? localStorage : undefined,
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true,   // ← required for PKCE OAuth callback
-      flowType: 'pkce',           // ← explicit; Supabase v2 default but needed here
+      storage: typeof window !== "undefined" ? localStorage : undefined,
+      persistSession: isSupabaseConfigured,
+      autoRefreshToken: isSupabaseConfigured,
+      detectSessionInUrl: isSupabaseConfigured,
+      flowType: "pkce",
     },
-  }
+  },
 );

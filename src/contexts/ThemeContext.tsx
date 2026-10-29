@@ -12,14 +12,14 @@ const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
     if (typeof window === "undefined") return "dark";
-    const stored = localStorage.getItem("gnl1z-theme") as Theme | null;
-    return stored ?? "dark";
+    try { return localStorage.getItem("gnl1z-theme") === "light" ? "light" : "dark"; }
+    catch { return "dark"; }
   });
 
   useEffect(() => {
     const root = document.documentElement;
     root.classList.toggle("dark", theme === "dark");
-    localStorage.setItem("gnl1z-theme", theme);
+    try { localStorage.setItem("gnl1z-theme", theme); } catch { /* Preference is optional. */ }
   }, [theme]);
 
   return (

@@ -533,7 +533,7 @@ export default function PIDViewer() {
                       />
                       {/* Hover overlay */}
                       <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40">
-                        <div className="flex items-center gap-2 text-white text-sm font-mono">
+                        <div className="flex items-center gap-2 text-foreground text-sm font-mono">
                           <ZoomIn className="h-4 w-4" /> {T("View", "Afficher")}
                         </div>
                       </div>
@@ -595,7 +595,7 @@ export default function PIDViewer() {
               />
               <div className="min-w-0">
                 <div className="text-[10px] font-mono text-white/50 truncate">{selected.drawing}</div>
-                <div className="text-sm font-semibold text-white truncate">
+                <div className="text-sm font-semibold text-foreground truncate">
                   {lang === "fr" ? selected.title.fr : selected.title.en}
                 </div>
               </div>
@@ -640,7 +640,7 @@ export default function PIDViewer() {
                 <div className="text-[10px] uppercase tracking-widest font-mono mb-2" style={{ color: ACCENT }}>
                   {T("Drawing No.", "N° Plan")}
                 </div>
-                <div className="text-white font-mono text-xs">{selected.drawing}</div>
+                <div className="text-foreground font-mono text-xs">{selected.drawing}</div>
               </div>
 
               <div>

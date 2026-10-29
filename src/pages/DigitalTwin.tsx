@@ -2,8 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { ArrowRight, Play, Pause, AlertTriangle, Zap } from 'lucide-react';
 
 const DigitalTwinDashboard: React.FC = () => {
+  const equipmentData: Record<string, { name: string; status: string; temp: number; pressure: number; desc: string }> = {
+    '101-F502': { name: 'Feed Gas Inlet', status: 'normal', temp: 35, pressure: 65, desc: 'Natural gas from Hassi R\'Mel' },
+    '101-G507': { name: 'Amine Contactor', status: 'normal', temp: 45, pressure: 62, desc: 'MEA CO2 Absorption (Section 1)' },
+    '104-F07.11': { name: 'Regenerator', status: 'normal', temp: 125, pressure: 1.5, desc: 'MEA Regeneration' },
+    '106-E05.20': { name: 'Main Cryogenic Exchanger', status: 'normal', temp: -150, pressure: 55, desc: 'Liquefaction Core' },
+    // Add more from PFD...
+  };
+
   const [isRunning, setIsRunning] = useState(true);
-  const [selectedEquipment, setSelectedEquipment] = useState<any>(null);
+  const [selectedEquipment, setSelectedEquipment] = useState<(typeof equipmentData)[keyof typeof equipmentData] | null>(null);
   const [kpis, setKpis] = useState({
     feedFlow: 850,
     co2Removal: 98.5,
@@ -26,14 +34,6 @@ const DigitalTwinDashboard: React.FC = () => {
     return () => clearInterval(interval);
   }, [isRunning]);
 
-  const equipmentData = {
-    '101-F502': { name: 'Feed Gas Inlet', status: 'normal', temp: 35, pressure: 65, desc: 'Natural gas from Hassi R\'Mel' },
-    '101-G507': { name: 'Amine Contactor', status: 'normal', temp: 45, pressure: 62, desc: 'MEA CO2 Absorption (Section 1)' },
-    '104-F07.11': { name: 'Regenerator', status: 'normal', temp: 125, pressure: 1.5, desc: 'MEA Regeneration' },
-    '106-E05.20': { name: 'Main Cryogenic Exchanger', status: 'normal', temp: -150, pressure: 55, desc: 'Liquefaction Core' },
-    // Add more from PFD...
-  };
-
   const refrigerationLoop = [
     { id: 'K-502', name: 'MR Compressor HP', status: 'running' },
     { id: 'K-503', name: 'Propane Compressor', status: 'running' },
@@ -48,7 +48,7 @@ const DigitalTwinDashboard: React.FC = () => {
             <h1 className="text-4xl font-bold flex items-center gap-3">
               <span className="text-cyan-400">🌀</span> GL1Z LNG DIGITAL TWIN
             </h1>
-            <p className="text-slate-400">Sonatrach GL1/Z - Integrated Train Process Flow • Live DCS View</p>
+            <p className="text-slate-400">Sonatrach GL1/Z - Integrated Train Process Flow • Illustrative simulation</p>
           </div>
           <div className="flex items-center gap-4">
             <button

@@ -1,105 +1,62 @@
-# GNL1Z Asset Management
+# GNL1Z Asset Management Elite
 
-Industrial LNG asset management platform for Sonatrach GL1/Z.
+Industrial LNG asset-management web app for Sonatrach GL1/Z, built with React, TypeScript, Vite, Supabase, Dexie, and a generated PWA.
 
-**Repository:** `https://github.com/djslimaniunivboumerdes-netizen/GNL1Z-Asset-Management`
+**Status:** enhanced release candidate. The UI, offline workflow, and build are validated with isolated fixtures; live backend authorization and engineering sign-off are still required before operational production use.
 
-## Features
-
-- React + TypeScript + Vite
-- Cloudflare Workers deployment
-- Supabase backend
-- Electron desktop support
-- PWA support
-- QR equipment scanning
-- Industrial-ready architecture
-- GitHub Actions CI/CD
-
-## Quick Start
+## Quick start
 
 ```bash
-# 1. Clone
-git clone https://github.com/djslimaniunivboumerdes-netizen/GNL1Z-Asset-Management.git
-cd GNL1Z-Asset-Management
-
-# 2. Install dependencies
-bun install
-
-# 3. Configure environment
+npm ci
 cp .env.example .env
-# Fill in your Supabase values
-
-# 4. Run dev server
-bun run dev
+# Fill in the Supabase project URL and publishable/anon key.
+npm run dev
 ```
 
-## GitHub Actions Secrets (Required for CI/CD)
+Bun is also supported (`bun install`, `bun run dev`). The npm lockfile is the canonical CI lockfile.
 
-Go to **Repository Settings → Secrets and variables → Actions → New repository secret** and add:
+## Scripts
 
-| Secret | Description |
-|--------|-------------|
-| `CLOUDFLARE_API_TOKEN` | Cloudflare API token with Cloudflare Workers edit permission |
-| `CLOUDFLARE_ACCOUNT_ID` | Your Cloudflare account ID |
-| `VITE_SUPABASE_URL` | Your Supabase project URL |
-| `VITE_SUPABASE_PUBLISHABLE_KEY` | Your Supabase anon/public key |
-| `VITE_SUPABASE_PROJECT_ID` | Your Supabase project ID |
+| Command | Purpose |
+|---|---|
+| `npm run dev` | Vite development server on port 8080 |
+| `npm run check` | TypeScript + ESLint + Vitest |
+| `npm run build` | Typecheck, production bundle, and generated PWA in `dist/` |
+| `npm run preview` | Serve the production build on port 8081 |
+| `npm run images:optimize` | Regenerate used responsive WebP hero derivatives |
+| `npm run electron:build:win` | Windows desktop package |
+| `npm run electron:build:linux` | Linux desktop package |
 
-**Never commit these to the repository.** Use GitHub secrets only.
+## Environment
 
-## Workflows
+Client variables are documented in `.env.example`. Only the Supabase publishable/anon key belongs in browser-facing variables. Never expose a Supabase service-role key or AI provider key through `VITE_*`.
 
-| Workflow | Trigger | Purpose |
-|----------|---------|---------|
-| `CI` | PR / push to `main` | Lint, typecheck, test, build |
-| `Deploy` | Push to `main` | Build & deploy to Cloudflare Workers |
-| `Release` | Push tag `v*` | Build Electron apps (Windows + Linux) and create GitHub release |
+Optional Cloudflare Pages Function variables:
 
-## Local Wrangler Development
+- `GEMINI_API_KEY` — server-side AI provider key. Without it, the assistant returns bounded static-reference answers only.
+- `GEMINI_MODEL` — optional provider model override.
 
-```bash
-# Run Cloudflare Workers dev server
-bun run cf:dev
+## Deployment
 
-# Deploy manually
-bun run deploy
+`npm run build` produces the static/PWA assets in `dist/`. The `functions/` directory contains Cloudflare Pages Functions for the assistant, manual search, and health endpoint. A static-only deployment will still serve the register and offline shell, but `/api/*` endpoints require a compatible functions runtime.
 
-# Deploy to staging
-bun run deploy:staging
-```
+Before deployment, review [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md), apply backend migrations only to a reviewed staging project, configure secrets in the hosting platform, and verify the live auth/storage/RLS workflows.
 
-## Build Desktop App
+## CI
 
-```bash
-# Windows
-bun run electron:build:win
+`.github/workflows/ci.yml` runs locked installation, typecheck, lint, regression tests, and the production build on pull requests and pushes to `main`. Deployment/release workflows are intentionally not included until hosting and backend approval are configured.
 
-# Linux
-bun run electron:build:linux
-```
+## Documentation
 
-## Project Structure
+- [START_HERE.md](START_HERE.md) — ZIP contents and local run instructions
+- [docs/ENHANCEMENTS.md](docs/ENHANCEMENTS.md) — completed enhancement pass
+- [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md) — prioritized remaining work
+- [docs/ENGINEERING_VALIDATION.md](docs/ENGINEERING_VALIDATION.md) — process/P&ID/engineering assumptions and sign-off checklist
+- [docs/VALIDATION_REPORT.md](docs/VALIDATION_REPORT.md) — final validation results
 
-```
-├── .github/workflows/      # CI/CD pipelines
-├── electron/               # Electron main process
-├── public/                 # Static assets (PWA icons, headers, redirects)
-├── src/                    # React app source
-│   ├── components/ui/      # shadcn/ui components
-│   ├── contexts/           # Theme & i18n contexts
-│   ├── data/               # Static data (DCS tags, equipment, manuals)
-│   ├── hooks/              # Custom React hooks
-│   ├── integrations/       # Supabase client
-│   ├── lib/                # Utility functions
-│   ├── pages/              # Route pages
-│   ├── worker.ts           # Cloudflare Worker entry
-│   └── main.tsx            # React app entry
-├── supabase/
-│   ├── functions/          # Edge functions (AI DCS detection, news feed)
-│   └── migrations/         # Database migrations
-├── wrangler.toml           # Cloudflare Workers config
-└── vite.config.ts          # Vite build config
-```
+## Safety notice
+
+This application is decision support, not a control system, fitness-for-service assessment, approved test procedure, lift plan, or operating authorization. Simulated process alarms are not live telemetry. Engineering outputs must be verified against approved site procedures, current P&IDs, manufacturer data, and competent-engineer review.
 
 ## License
 

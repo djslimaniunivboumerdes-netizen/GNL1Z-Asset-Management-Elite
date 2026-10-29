@@ -1,14 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import Fuse from "fuse.js";
-import { format, parseISO } from "date-fns";
 import { ArrowLeft, Copy, Check, Download, Wrench, Anchor, Snowflake, Package, Info, Search, FileText, Save, CalendarIcon, ExternalLink, QrCode, X, ShieldCheck, Plus, Trash2, Beaker, Gauge, Sparkles, AlertOctagon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Calendar } from "@/components/ui/calendar";
 import { getEquipmentByTag, isShellAndTube, type SparePart, type Equipment } from "@/data";
 import { buildEngineeringJudgment, type RiskTier } from "@/lib/engineeringJudgment";
 import {
@@ -16,7 +13,10 @@ import {
   insulationRecommendation, exportToCsv, defaultBoltForType, recommendCrane,
 } from "@/lib/industrial";
 import { useI18n } from "@/contexts/I18nContext";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, isSupabaseConfigured } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { useQueryClient } from "@tanstack/react-query";
+import type { Tables } from "@/integrations/supabase/types";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { SvgQr } from "@/components/SvgQr";
@@ -26,161 +26,139 @@ import { EquipmentTestStatus } from "@/components/EquipmentTestStatus";
 import NotFound from "./NotFound";
 
 
-const TRAINS = ["T100", "T200", "T300", "T400", "T500", "T600"];
 
 export default function EquipmentDetail() {
   const { tag = "" } = useParams();
   const { t, lang } = useI18n();
+  const { user } = useAuth();
   const eq = getEquipmentByTag(decodeURIComponent(tag));
+  const equipmentTag = eq?.tag;
 
   const [qrOpen, setQrOpen] = useState(false);
-  const [notes, setNotes] = useState<any[]>([]);
+  const [notes, setNotes] = useState<Tables<"equipment_notes">["Row"][]>([]);
   const [newNote, setNewNote] = useState("");
-  const [train, setTrain] = useState("T100");
   const [savingNote, setSavingNote] = useState(false);
+  const [notesError, setNotesError] = useState(false);
 
-  if (!eq) return <NotFound />;
-
-  const boltSize = defaultBoltForType(eq.type.code);
+  const boltSize = defaultBoltForType(eq?.type.code ?? "");
   const wrench = predictWrench(boltSize);
   const tools = predictToolKit(boltSize);
-  const shackle = suggestShackle(eq.technical.weight_kg);
-  const safety = safetyLoadKg(eq.technical.weight_kg);
-  const insulation = insulationRecommendation(eq.type.code, eq.technical.temperature_c);
-  const crane = recommendCrane(eq.technical.weight_kg);
-  const judgment = useMemo(() => buildEngineeringJudgment(eq), [eq]);
+  const shackle = suggestShackle(eq?.technical.weight_kg ?? 0);
+  const safety = safetyLoadKg(eq?.technical.weight_kg ?? 0);
+  const insulation = insulationRecommendation(eq?.type.code ?? "", eq?.technical.temperature_c);
+  const crane = recommendCrane(eq?.technical.weight_kg ?? 0);
+  const judgment = useMemo(() => eq ? buildEngineeringJudgment(eq) : null, [eq]);
 
-  const pageUrl = `${window.location.origin}/equipment/${encodeURIComponent(eq.tag)}`;
+  const pageUrl = `${window.location.origin}/equipment/${encodeURIComponent(eq?.tag ?? "")}`;
 
   useEffect(() => {
+    if (!equipmentTag) return;
+    if (!isSupabaseConfigured) { setNotesError(true); return; }
     let active = true;
+    setNotesError(false);
 
-    (async () => {
+    void (async () => {
+      try {
       const { data, error } = await supabase
         .from("equipment_notes")
         .select("*")
-        .eq("tag", eq.tag)
+        .eq("tag", equipmentTag ?? "")
         .order("created_at", { ascending: false });
 
-      if (error) {
-        console.error("Notes load error:", error.message);
+      if (active) {
+        setNotesError(Boolean(error));
+        if (!error) setNotes(data ?? []);
       }
-
-      if (active) setNotes(data ?? []);
+      } catch { if (active) setNotesError(true); }
     })();
 
     return () => {
       active = false;
     };
-  }, [eq.tag]);
+  }, [equipmentTag]);
 
   const addNote = async () => {
-    if (!newNote.trim()) return;
+    if (!eq || !newNote.trim() || !user || savingNote) return;
 
     setSavingNote(true);
 
-    const { error } = await supabase.from("equipment_notes").insert({
-      tag: eq.tag,
-      train,
-      note: newNote.trim(),
-    });
-
-    setSavingNote(false);
-
-    if (error) {
-      toast({
-        title: lang === "en" ? "Error" : "Erreur",
-        description: error.message,
-        variant: "destructive",
-      });
+    try {
+      const { error } = await supabase.from("equipment_notes").insert({ tag: eq.tag, notes: newNote.trim() });
+      if (error) throw error;
+    } catch (cause) {
+      toast({ title: lang === "en" ? "Note not saved" : "Note non enregistrée", description: cause instanceof Error ? cause.message : "Try again.", variant: "destructive" });
       return;
-    }
+    } finally { setSavingNote(false); }
 
     setNewNote("");
 
     const { data } = await supabase
       .from("equipment_notes")
       .select("*")
-      .eq("tag", eq.tag)
+      .eq("tag", equipmentTag ?? "")
       .order("created_at", { ascending: false });
 
-    setNotes(data ?? []);
+    if (data) setNotes(data);
   };
 
-  const deleteNote = async (id: string) => {
-    const { error } = await supabase
-      .from("equipment_notes")
-      .delete()
-      .eq("id", id);
-
-    if (error) {
-      toast({
-        title: lang === "en" ? "Delete failed" : "Échec de suppression",
-        description: error.message,
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setNotes((prev) => prev.filter((n) => n.id !== id));
-  };
+  if (!eq) return <NotFound />;
 
   return (
     <div className="px-4 md:px-8 py-6 md:py-8 max-w-7xl mx-auto space-y-6">
-      <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:text-white hover:bg-slate-900 rounded-xl px-3 py-2">
+      <Button asChild variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground hover:bg-card rounded-xl px-3 py-2">
         <Link to="/equipment"><ArrowLeft className="h-4 w-4 mr-2" /> {t("back")}</Link>
       </Button>
 
       {/* Hero Header */}
-      <div className="relative overflow-hidden border border-slate-800 rounded-3xl bg-slate-900/60 p-6 md:p-10 shadow-2xl backdrop-blur-md text-white">
+      <div className="relative overflow-hidden border border-border rounded-3xl bg-secondary/60 p-6 md:p-10 shadow-2xl backdrop-blur-md text-foreground">
         <div className="absolute top-0 right-0 w-72 h-72 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-cyan-500 via-blue-500 to-indigo-500" />
         <div className="relative">
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div>
-              <div className="font-mono text-xs uppercase tracking-widest text-cyan-400 mb-2 font-bold">{eq.type.name}</div>
+              <div className="font-mono text-xs uppercase tracking-widest text-cyan-700 dark:text-cyan-400 mb-2 font-bold">{eq.type.name}</div>
               <div className="flex items-center gap-4">
-                <h1 className="text-3xl md:text-5xl font-display font-bold tracking-tight text-white">{eq.tag}</h1>
+                <h1 className="text-3xl md:text-5xl font-display font-bold tracking-tight text-foreground">{eq.tag}</h1>
                 <button
                   onClick={() => setQrOpen(!qrOpen)}
                   title={lang === "en" ? "QR Code" : "Code QR"}
-                  className="shrink-0 h-11 w-11 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center justify-center transition-all shadow-md cursor-pointer"
+                  className="shrink-0 h-11 w-11 rounded-2xl bg-secondary hover:bg-secondary border border-border flex items-center justify-center transition-all shadow-md cursor-pointer"
                 >
-                  {qrOpen ? <X className="h-5 w-5 text-white" /> : <QrCode className="h-5 w-5 text-cyan-400" />}
+                  {qrOpen ? <X className="h-5 w-5 text-foreground" /> : <QrCode className="h-5 w-5 text-cyan-700 dark:text-cyan-400" />}
                 </button>
               </div>
-              <p className="text-slate-300 mt-3 max-w-2xl text-base leading-relaxed font-light">{eq.name}</p>
+              <p className="text-muted-foreground mt-3 max-w-2xl text-base leading-relaxed font-light">{eq.name}</p>
             </div>
             <div className="flex flex-wrap gap-2.5">
-              <Badge className="bg-slate-800 border border-slate-700 text-slate-200 font-mono px-3 py-1 rounded-full text-xs">{eq.unit}</Badge>
-              <Badge className="bg-slate-800 border border-slate-700 text-slate-200 font-mono px-3 py-1 rounded-full text-xs">{eq.section}</Badge>
-              <Badge className="bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 font-mono px-3 py-1 rounded-full text-xs">{eq.testing_status}</Badge>
+              <Badge className="bg-secondary border border-border text-foreground font-mono px-3 py-1 rounded-full text-xs">{eq.unit}</Badge>
+              <Badge className="bg-secondary border border-border text-foreground font-mono px-3 py-1 rounded-full text-xs">{eq.section}</Badge>
+              <Badge className="bg-cyan-500/20 border border-cyan-500/30 text-cyan-700 dark:text-cyan-300 font-mono px-3 py-1 rounded-full text-xs">{eq.testing_status}</Badge>
             </div>
           </div>
 
           {qrOpen && (
-            <div className="mt-8 pt-6 border-t border-slate-800 flex flex-col sm:flex-row items-start gap-6 animate-in fade-in duration-200">
+            <div className="mt-8 pt-6 border-t border-border flex flex-col sm:flex-row items-start gap-6 animate-in fade-in duration-200">
               <div className="bg-white rounded-2xl p-3 shadow-2xl shrink-0">
                 <SvgQr value={pageUrl} size={180} />
               </div>
-              <div className="text-slate-300 space-y-3 text-sm">
-                <div className="font-bold text-white text-lg tracking-tight">{eq.tag} — {lang === "en" ? "QR Code" : "Code QR"}</div>
-                <p className="text-xs text-slate-400 leading-relaxed max-w-sm font-light">
+              <div className="text-muted-foreground space-y-3 text-sm">
+                <div className="font-bold text-foreground text-lg tracking-tight">{eq.tag} — {lang === "en" ? "QR Code" : "Code QR"}</div>
+                <p className="text-xs text-muted-foreground leading-relaxed max-w-sm font-light">
                   {lang === "en" ? "Scan with any phone camera to open this page. Print at ≥ 4×4 cm for reliable scanning." : "Scannez avec l'appareil photo d'un téléphone pour ouvrir cette page. Imprimez à ≥ 4×4 cm pour un scan fiable."}
                 </p>
-                <div className="font-mono text-xs text-slate-500 break-all max-w-sm bg-slate-950 p-3 rounded-xl border border-slate-800">{pageUrl}</div>
+                <div className="font-mono text-xs text-muted-foreground break-all max-w-sm bg-background p-3 rounded-xl border border-border">{pageUrl}</div>
                 <div className="flex gap-3 pt-1">
                   <button
                     onClick={() => navigator.clipboard.writeText(pageUrl)}
-                    className="inline-flex items-center gap-2 text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded-xl px-4 py-2.5 transition-all shadow-md font-mono font-bold cursor-pointer"
+                    className="inline-flex items-center gap-2 text-xs bg-secondary hover:bg-secondary border border-border text-foreground rounded-xl px-4 py-2.5 transition-all shadow-md font-mono font-bold cursor-pointer"
                   >
-                    <Copy className="h-4 w-4 text-cyan-400" /> {lang === "en" ? "Copy URL" : "Copier l'URL"}
+                    <Copy className="h-4 w-4 text-cyan-700 dark:text-cyan-400" /> {lang === "en" ? "Copy URL" : "Copier l'URL"}
                   </button>
                   <button
                     onClick={() => window.print()}
-                    className="inline-flex items-center gap-2 text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded-xl px-4 py-2.5 transition-all shadow-md font-mono font-bold cursor-pointer"
+                    className="inline-flex items-center gap-2 text-xs bg-secondary hover:bg-secondary border border-border text-foreground rounded-xl px-4 py-2.5 transition-all shadow-md font-mono font-bold cursor-pointer"
                   >
-                    <Download className="h-4 w-4 text-emerald-400" /> {lang === "en" ? "Print" : "Imprimer"}
+                    <Download className="h-4 w-4 text-emerald-700 dark:text-emerald-400" /> {lang === "en" ? "Print" : "Imprimer"}
                   </button>
                 </div>
               </div>
@@ -190,13 +168,13 @@ export default function EquipmentDetail() {
       </div>
 
       <Tabs defaultValue="tech" className="w-full">
-        <TabsList className="w-full justify-start overflow-x-auto h-auto bg-slate-900/60 border border-slate-800 rounded-2xl p-1.5 shadow-lg backdrop-blur-sm">
-          <TabsTrigger value="tech" className="gap-2 text-xs font-mono py-2.5 px-4 rounded-xl data-[state=active]:bg-slate-800 data-[state=active]:text-cyan-400 transition-all"><Info className="h-4 w-4" /> {t("techInfo")}</TabsTrigger>
-          <TabsTrigger value="pdr" className="gap-2 text-xs font-mono py-2.5 px-4 rounded-xl data-[state=active]:bg-slate-800 data-[state=active]:text-cyan-400 transition-all"><Package className="h-4 w-4" /> {t("pdr")}</TabsTrigger>
-          <TabsTrigger value="tools" className="gap-2 text-xs font-mono py-2.5 px-4 rounded-xl data-[state=active]:bg-slate-800 data-[state=active]:text-cyan-400 transition-all"><Wrench className="h-4 w-4" /> {t("toolPredictor")}</TabsTrigger>
-          <TabsTrigger value="lifting" className="gap-2 text-xs font-mono py-2.5 px-4 rounded-xl data-[state=active]:bg-slate-800 data-[state=active]:text-cyan-400 transition-all"><Anchor className="h-4 w-4" /> {t("lifting")}</TabsTrigger>
-          <TabsTrigger value="insulation" className="gap-2 text-xs font-mono py-2.5 px-4 rounded-xl data-[state=active]:bg-slate-800 data-[state=active]:text-cyan-400 transition-all"><Snowflake className="h-4 w-4" /> {t("insulation")}</TabsTrigger>
-          <TabsTrigger value="judgment" className="gap-2 text-xs font-mono py-2.5 px-4 rounded-xl data-[state=active]:bg-slate-800 data-[state=active]:text-emerald-400 transition-all"><Sparkles className="h-4 w-4" /> {lang === "en" ? "AI Judgment" : "Jugement IA"}</TabsTrigger>
+        <TabsList className="w-full justify-start overflow-x-auto h-auto bg-secondary/60 border border-border rounded-2xl p-1.5 shadow-lg backdrop-blur-sm">
+          <TabsTrigger value="tech" className="gap-2 text-xs font-mono py-2.5 px-4 rounded-xl data-[state=active]:bg-secondary data-[state=active]:text-cyan-700 dark:data-[state=active]:text-cyan-400 transition-all"><Info className="h-4 w-4" /> {t("techInfo")}</TabsTrigger>
+          <TabsTrigger value="pdr" className="gap-2 text-xs font-mono py-2.5 px-4 rounded-xl data-[state=active]:bg-secondary data-[state=active]:text-cyan-700 dark:data-[state=active]:text-cyan-400 transition-all"><Package className="h-4 w-4" /> {t("pdr")}</TabsTrigger>
+          <TabsTrigger value="tools" className="gap-2 text-xs font-mono py-2.5 px-4 rounded-xl data-[state=active]:bg-secondary data-[state=active]:text-cyan-700 dark:data-[state=active]:text-cyan-400 transition-all"><Wrench className="h-4 w-4" /> {t("toolPredictor")}</TabsTrigger>
+          <TabsTrigger value="lifting" className="gap-2 text-xs font-mono py-2.5 px-4 rounded-xl data-[state=active]:bg-secondary data-[state=active]:text-cyan-700 dark:data-[state=active]:text-cyan-400 transition-all"><Anchor className="h-4 w-4" /> {t("lifting")}</TabsTrigger>
+          <TabsTrigger value="insulation" className="gap-2 text-xs font-mono py-2.5 px-4 rounded-xl data-[state=active]:bg-secondary data-[state=active]:text-cyan-700 dark:data-[state=active]:text-cyan-400 transition-all"><Snowflake className="h-4 w-4" /> {t("insulation")}</TabsTrigger>
+          <TabsTrigger value="judgment" className="gap-2 text-xs font-mono py-2.5 px-4 rounded-xl data-[state=active]:bg-secondary data-[state=active]:text-emerald-700 dark:data-[state=active]:text-emerald-400 transition-all"><Sparkles className="h-4 w-4" /> {lang === "en" ? "AI Judgment" : "Jugement IA"}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="tech" className="mt-6 space-y-6">
@@ -210,85 +188,88 @@ export default function EquipmentDetail() {
         </TabsContent>
 
         <TabsContent value="lifting" className="mt-6 space-y-6">
+          <div role="note" className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs leading-relaxed text-amber-800 dark:text-amber-200">
+            {lang === "en" ? "Screening guidance only — not an approved lift plan. Verify mass, centre of gravity, rigging geometry, sling angles, crane chart at the actual radius/configuration, ground bearing and site lift procedures before any lift." : "Orientation uniquement — ne constitue pas un plan de levage approuvé. Vérifier la masse, le centre de gravité, la géométrie du gréement, les angles d'élingage, l'abaque de grue au rayon/configuration réel, la portance du sol et les procédures de levage du site avant tout levage."}
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <BigStat label={t("weight")} value={`${eq.technical.weight_kg} kg`} />
             <BigStat label={t("safetyLoad")} value={`${safety} kg`} accent />
             <BigStat label={t("liftingMethod")} value={eq.maintenance.lifting_method.replace(/_/g, " ")} />
           </div>
-          <div className="border border-slate-800 rounded-3xl bg-slate-900/40 p-8 backdrop-blur-sm shadow-xl">
+          <div className="border border-border rounded-3xl bg-secondary/40 p-8 backdrop-blur-sm shadow-xl">
             <div className="flex items-center gap-3 mb-4">
-              <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400">
+              <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400">
                 <Anchor className="h-5 w-5" />
               </div>
-              <h3 className="text-xl font-bold text-white tracking-tight">{t("shackle")}</h3>
+              <h3 className="text-xl font-bold text-foreground tracking-tight">{t("shackle")}</h3>
             </div>
             {shackle ? (
               <div className="grid grid-cols-2 gap-6">
-                <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-5 shadow-inner">
-                  <div className="text-xs text-slate-400 uppercase tracking-wider font-mono mb-2">{lang === "en" ? "Size" : "Taille"}</div>
-                  <div className="text-3xl font-extrabold text-amber-400 font-mono">{shackle.size}</div>
+                <div className="bg-secondary/60 border border-border rounded-2xl p-5 shadow-inner">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wider font-mono mb-2">{lang === "en" ? "Size" : "Taille"}</div>
+                  <div className="text-3xl font-extrabold text-amber-700 dark:text-amber-400 font-mono">{shackle.size}</div>
                 </div>
-                <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-5 shadow-inner">
-                  <div className="text-xs text-slate-400 uppercase tracking-wider font-mono mb-2">WLL (Charge Utile)</div>
-                  <div className="text-3xl font-extrabold text-white font-mono">{shackle.wll_t} t</div>
+                <div className="bg-secondary/60 border border-border rounded-2xl p-5 shadow-inner">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wider font-mono mb-2">WLL (Charge Utile)</div>
+                  <div className="text-3xl font-extrabold text-foreground font-mono">{shackle.wll_t} t</div>
                 </div>
-                <div className="col-span-2 text-xs text-slate-400 border-t border-slate-800 pt-4 font-mono">
-                  {lang === "en" ? `Calculated from ${eq.technical.weight_kg} kg × 1.5 safety factor = ${(safety / 1000).toFixed(2)} t. Crosby G-209 reference.` : `Calculé à partir de ${eq.technical.weight_kg} kg × 1.5 de facteur de sécurité = ${(safety / 1000).toFixed(2)} t. Référence Crosby G-209.`}
+                <div className="col-span-2 text-xs text-muted-foreground border-t border-border pt-4 font-mono">
+                  {lang === "en" ? `Calculated from ${eq.technical.weight_kg} kg × 1.5 safety factor = ${safety != null ? (safety / 1000).toFixed(2) : "—"} t. Crosby G-209 reference; verify manufacturer WLL and rigging geometry.` : `Calculé à partir de ${eq.technical.weight_kg} kg × 1.5 de facteur de sécurité = ${safety != null ? (safety / 1000).toFixed(2) : "—"} t. Référence Crosby G-209 ; vérifier la CMU du fabricant et la géométrie du gréement.`}
                 </div>
               </div>
             ) : (
-              <EmptyState message={lang === "en" ? "No mass recorded — shackle cannot be sized." : "Masse non enregistrée — la manille ne peut être calculée."} />
+              <EmptyState message={lang === "en" ? "No valid mass recorded, or the screening load is outside the reference table — obtain an approved rigging study." : "Masse valide non enregistrée ou charge hors tableau — demander une étude de gréement approuvée."} />
             )}
           </div>
 
-          <div className="border border-slate-800 rounded-3xl bg-slate-900/40 p-8 backdrop-blur-sm shadow-xl">
+          <div className="border border-border rounded-3xl bg-secondary/40 p-8 backdrop-blur-sm shadow-xl">
             <div className="flex items-center gap-3 mb-4">
-              <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
+              <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-700 dark:text-cyan-400">
                 <Wrench className="h-5 w-5" />
               </div>
-              <h3 className="text-xl font-bold text-white tracking-tight">{lang === "en" ? "Crane recommendation" : "Grue recommandée"}</h3>
+              <h3 className="text-xl font-bold text-foreground tracking-tight">{lang === "en" ? "Crane recommendation" : "Grue recommandée"}</h3>
             </div>
             {crane ? (
               <div className="grid grid-cols-2 gap-6">
-                <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-5 shadow-inner">
-                  <div className="text-xs text-slate-400 uppercase tracking-wider font-mono mb-2">{lang === "en" ? "Capacity" : "Capacité"}</div>
-                  <div className="text-3xl font-extrabold text-cyan-400 font-mono">{crane.capacity_t}{crane.capacity_t >= 100 ? "+" : ""} T</div>
+                <div className="bg-secondary/60 border border-border rounded-2xl p-5 shadow-inner">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wider font-mono mb-2">{lang === "en" ? "Capacity" : "Capacité"}</div>
+                  <div className="text-3xl font-extrabold text-cyan-700 dark:text-cyan-400 font-mono">{crane.capacity_t}{crane.capacity_t >= 100 ? "+" : ""} T</div>
                 </div>
-                <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-5 shadow-inner">
-                  <div className="text-xs text-slate-400 uppercase tracking-wider font-mono mb-2">{lang === "en" ? "Type" : "Type"}</div>
-                  <div className="text-lg font-bold text-white tracking-tight mt-1">{crane.label}</div>
+                <div className="bg-secondary/60 border border-border rounded-2xl p-5 shadow-inner">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wider font-mono mb-2">{lang === "en" ? "Type" : "Type"}</div>
+                  <div className="text-lg font-bold text-foreground tracking-tight mt-1">{crane.label}</div>
                 </div>
-                <div className="col-span-2 text-xs text-slate-300 border-t border-slate-800 pt-4 font-light leading-relaxed">
+                <div className="col-span-2 text-xs text-muted-foreground border-t border-border pt-4 font-light leading-relaxed">
                   {crane.rationale}
                 </div>
-                <div className="col-span-2 text-xs text-slate-500 font-mono bg-slate-950 p-4 rounded-xl border border-slate-800">
+                <div className="col-span-2 text-xs text-muted-foreground font-mono bg-background p-4 rounded-xl border border-border">
                   {lang === "en" ? "GNL1Z fleet: 12 T · 24 T · 35 T · 54 T · 74 T · 100+ T" : "Flotte GNL1Z : 12 T · 24 T · 35 T · 54 T · 74 T · 100+ T"}
                 </div>
               </div>
             ) : (
-              <EmptyState message={lang === "en" ? "No mass recorded — crane cannot be sized." : "Masse non enregistrée — la grue ne peut être calculée."} />
+              <EmptyState message={lang === "en" ? "No valid mass recorded, or no configured fleet class passes this screening check — an engineered lift plan is required." : "Masse valide non enregistrée ou aucune classe de la flotte ne passe ce contrôle — un plan de levage étudié est requis."} />
             )}
           </div>
         </TabsContent>
 
         <TabsContent value="insulation" className="mt-6">
-          <div className="border border-slate-800 rounded-3xl bg-slate-900/40 p-8 backdrop-blur-sm shadow-xl">
+          <div className="border border-border rounded-3xl bg-secondary/40 p-8 backdrop-blur-sm shadow-xl">
             <div className="flex items-center gap-3 mb-6">
-              <div className="p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-400">
+              <div className="p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-700 dark:text-blue-400">
                 <Snowflake className="h-5 w-5" />
               </div>
-              <h3 className="text-xl font-bold text-white tracking-tight">{t("insulationReq")}</h3>
+              <h3 className="text-xl font-bold text-foreground tracking-tight">{t("insulationReq")}</h3>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <BigStat label={lang === "en" ? "Status" : "Statut"} value={insulation.required ? (lang === "en" ? "Required" : "Requis") : (lang === "en" ? "Not required" : "Non requis")} accent={insulation.required} />
+              <BigStat label={lang === "en" ? "Status" : "Statut"} value={insulation.dataMissing ? (lang === "en" ? "Not assessed" : "Non évalué") : insulation.required ? (lang === "en" ? "Review required" : "À vérifier") : (lang === "en" ? "Ambient band" : "Plage ambiante")} accent={insulation.required && !insulation.dataMissing} />
               <BigStat label={lang === "en" ? "Thickness" : "Épaisseur"} value={insulation.thickness_mm ? `${insulation.thickness_mm} mm` : "—"} />
               <BigStat label={lang === "en" ? "Material" : "Matériau"} value={insulation.material} />
             </div>
-            <div className="mt-6 text-sm text-slate-300 border-t border-slate-800 pt-6 font-light leading-relaxed">
-              <span className="font-bold text-white">{lang === "en" ? "Rationale: " : "Explication : "}</span>{insulation.rationale}
+            <div className="mt-6 text-sm text-muted-foreground border-t border-border pt-6 font-light leading-relaxed">
+              <span className="font-bold text-foreground">{lang === "en" ? "Rationale: " : "Explication : "}</span>{insulation.rationale}
             </div>
-            <div className="mt-4 text-xs text-slate-500 font-mono bg-slate-950 p-4 rounded-xl border border-slate-800">
-              {lang === "en" ? "Equipment type:" : "Type d'équipement :"} {eq.type.code} ({eq.type.name})
+            <div className="mt-4 text-xs text-muted-foreground font-mono bg-background p-4 rounded-xl border border-border">
+              {lang === "en" ? "Screening only. Confirm the approved insulation specification, vapour barrier, personnel protection and operating envelope. Equipment type:" : "Orientation uniquement. Confirmer la spécification d'isolation approuvée, le pare-vapeur, la protection du personnel et l'enveloppe de fonctionnement. Type d'équipement :"} {eq.type.code} ({eq.type.name})
             </div>
           </div>
         </TabsContent>
@@ -300,34 +281,30 @@ export default function EquipmentDetail() {
 
       <div className="mt-8 flex justify-end">
         <Button asChild className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-xl py-6 px-6 shadow-lg shadow-cyan-500/20 gap-2.5 text-sm transition-all">
-          <Link to={`/equipment/${encodeURIComponent(eq.tag)}/log`}>
-            <ShieldCheck className="h-5 w-5 text-cyan-300" /> {lang === "en" ? "Log maintenance test" : "Enregistrer un essai de maintenance"}
+          <Link to={`/equipment/${encodeURIComponent(eq?.tag ?? "")}/log`}>
+            <ShieldCheck className="h-5 w-5 text-cyan-700 dark:text-cyan-300" /> {lang === "en" ? "Log maintenance test" : "Enregistrer un essai de maintenance"}
           </Link>
         </Button>
       </div>
 
-      {/* Field Notes (Multi-Note + Train) */}
-      <div className="border border-slate-800 rounded-3xl bg-slate-900/40 p-8 backdrop-blur-sm shadow-xl space-y-6">
+      {/* Shared field notes: append-only under the committed RLS contract. */}
+      <div className="border border-border rounded-3xl bg-secondary/40 p-8 backdrop-blur-sm shadow-xl space-y-6">
         <div className="flex items-center justify-between">
-          <h3 className="text-xl font-bold text-white tracking-tight">{lang === "en" ? "Field Notes" : "Notes de Terrain"}</h3>
+          <h3 className="text-xl font-bold text-foreground tracking-tight">{lang === "en" ? "Field Notes" : "Notes de Terrain"}</h3>
         </div>
 
+        {!user && <p className="text-sm text-muted-foreground">{lang === "en" ? "Sign in to add a field note." : "Connectez-vous pour ajouter une note."}</p>}
+        {notesError && <p role="alert" className="text-sm text-muted-foreground">{lang === "en" ? "Notes unavailable. Existing notes cannot be verified." : "Notes indisponibles. Les notes existantes ne peuvent être vérifiées."}</p>}
         <div className="flex flex-col sm:flex-row gap-3">
-          <select
-            value={train}
-            onChange={(e) => setTrain(e.target.value)}
-            className="h-12 rounded-xl bg-slate-950 border border-slate-800 px-4 text-sm font-mono text-white focus:border-cyan-500 focus:outline-none transition-colors shrink-0"
-          >
-            {TRAINS.map((t) => (
-              <option key={t} value={t}>{t}</option>
-            ))}
-          </select>
 
           <Input
             value={newNote}
+            disabled={!user || savingNote}
+            maxLength={5000}
+            aria-label={lang === "en" ? "New field note" : "Nouvelle note de terrain"}
             onChange={(e) => setNewNote(e.target.value)}
             placeholder={lang === "en" ? "Add a note…" : "Ajouter une note…"}
-            className="flex-1 h-12 bg-slate-950 border-slate-800 text-white rounded-xl text-sm font-light placeholder:text-slate-500 focus:border-cyan-500"
+            className="flex-1 h-12 bg-background border-border text-foreground rounded-xl text-sm font-light placeholder:text-muted-foreground focus:border-cyan-500"
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -336,7 +313,7 @@ export default function EquipmentDetail() {
             }}
           />
 
-          <Button onClick={addNote} disabled={savingNote || !newNote.trim()} className="shrink-0 h-12 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl px-6 shadow-lg shadow-cyan-600/20 transition-all">
+          <Button onClick={addNote} disabled={savingNote || !newNote.trim() || !user} className="shrink-0 h-12 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl px-6 shadow-lg shadow-cyan-600/20 transition-all">
             <Save className="h-4 w-4 mr-2" />
             {savingNote ? "…" : (lang === "en" ? "Save" : "Enregistrer")}
           </Button>
@@ -344,35 +321,27 @@ export default function EquipmentDetail() {
 
         <div className="space-y-3">
           {notes.length === 0 ? (
-            <p className="text-sm text-slate-500 font-mono bg-slate-950/60 p-6 rounded-2xl border border-slate-800/80 text-center">{lang === "en" ? "No notes yet." : "Aucune note pour le moment."}</p>
+            <p className="text-sm text-muted-foreground font-mono bg-secondary/60 p-6 rounded-2xl border border-border text-center">{lang === "en" ? "No notes in the connected register." : "Aucune note dans le registre connecté."}</p>
           ) : (
             notes.map((n) => (
               <div
                 key={n.id}
-                className="border border-slate-800 rounded-2xl p-5 bg-slate-950/40 flex justify-between items-start gap-4 shadow-inner hover:border-slate-700 transition-colors"
+                className="border border-border rounded-2xl p-5 bg-secondary/40 flex justify-between items-start gap-4 shadow-inner hover:border-border transition-colors"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-3 mb-2">
-                    <Badge variant="secondary" className="font-mono text-xs bg-slate-800 text-cyan-400 border border-slate-700 px-2.5 py-1 rounded-full">
-                      {n.train || "T100"}
+                    <Badge variant="secondary" className="font-mono text-xs bg-secondary text-cyan-700 dark:text-cyan-400 border border-border px-2.5 py-1 rounded-full">
+                      {eq.unit}
                     </Badge>
-                    <span className="text-xs text-slate-400 font-mono">
+                    <span className="text-xs text-muted-foreground font-mono">
                       {n.created_at
                         ? new Date(n.created_at).toLocaleString(lang === "en" ? "en-US" : "fr-FR", { dateStyle: "short", timeStyle: "short" })
                         : ""}
                     </span>
                   </div>
-                  <p className="text-sm text-slate-200 break-words leading-relaxed font-light">{n.note}</p>
+                  <p className="text-sm text-foreground break-words leading-relaxed font-light">{n.notes}</p>
                 </div>
 
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => deleteNote(n.id)}
-                  className="shrink-0 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl p-2.5 transition-colors"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
               </div>
             ))
           )}
@@ -403,13 +372,13 @@ function TechInfoTab({ eq }: { eq: Equipment }) {
         {eq.technical.temperature_c != null && <Field label={lang === "en" ? "Temp (°C)" : "Temp (°C)"} value={eq.technical.temperature_c} mono />}
       </div>
 
-      <div className="border border-slate-800 rounded-3xl bg-slate-900/40 p-8 backdrop-blur-sm shadow-xl">
+      <div className="border border-border rounded-3xl bg-secondary/40 p-8 backdrop-blur-sm shadow-xl">
         <div className="flex items-center gap-3 mb-6">
-          <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
+          <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-700 dark:text-cyan-400">
             <Info className="h-5 w-5" />
           </div>
-          <h3 className="text-xl font-bold text-white tracking-tight">{t("testPressure")}</h3>
-          {isExch && <Badge variant="outline" className="font-mono text-xs bg-slate-800 text-slate-300 border-slate-700 px-3 py-1 rounded-full ml-2">{lang === "en" ? "Shell & Tube" : "Calandre & Faisceau"}</Badge>}
+          <h3 className="text-xl font-bold text-foreground tracking-tight">{t("testPressure")}</h3>
+          {isExch && <Badge variant="outline" className="font-mono text-xs bg-secondary text-muted-foreground border-border px-3 py-1 rounded-full ml-2">{lang === "en" ? "Shell & Tube" : "Calandre & Faisceau"}</Badge>}
         </div>
         {isExch ? (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -424,30 +393,30 @@ function TechInfoTab({ eq }: { eq: Equipment }) {
             <PressureCell label={t("testPressure")} value={tp?.test_bar} accent />
           </div>
         )}
-        <div className="text-xs text-slate-400 mt-6 border-t border-slate-800 pt-6 font-mono leading-relaxed bg-slate-950/60 p-5 rounded-2xl shadow-inner">
+        <div className="text-xs text-muted-foreground mt-6 border-t border-border pt-6 font-mono leading-relaxed bg-secondary/60 p-5 rounded-2xl shadow-inner">
           {lang === "en"
             ? "Test pressures derived per ASME VIII (1.43× MAWP design × 1.3 hydrotest)."
             : "Pressions d'épreuve calculées selon ASME VIII (1.43× pression de calcul × 1.3 hydrotest)."}
         </div>
       </div>
 
-      <div className="border border-slate-800 rounded-3xl bg-slate-900/40 p-8 backdrop-blur-sm shadow-xl">
+      <div className="border border-border rounded-3xl bg-secondary/40 p-8 backdrop-blur-sm shadow-xl">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-400">
+            <div className="p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-700 dark:text-purple-400">
               <FileText className="h-5 w-5" />
             </div>
-            <h3 className="text-xl font-bold text-white tracking-tight">{lang === "en" ? "Isolation Plan" : "Plan d'Isolement"}</h3>
+            <h3 className="text-xl font-bold text-foreground tracking-tight">{lang === "en" ? "Isolation Plan" : "Plan d'Isolement"}</h3>
           </div>
           {eq.pid_drive_id ? (
-            <Button asChild className="bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl py-5 px-6 shadow-lg shadow-purple-600/20 gap-2.5 text-sm transition-all">
+            <Button asChild className="bg-purple-600 hover:bg-purple-500 text-foreground font-bold rounded-xl py-5 px-6 shadow-lg shadow-purple-600/20 gap-2.5 text-sm transition-all">
               <a href={`https://drive.google.com/file/d/${eq.pid_drive_id}/preview`} target="_blank" rel="noopener noreferrer">
                 <FileText className="h-4 w-4" /> {lang === "en" ? "Open Isolation Plan" : "Ouvrir le Plan d'Isolement"}
                 <ExternalLink className="h-4 w-4 ml-1" />
               </a>
             </Button>
           ) : (
-            <Badge variant="outline" className="text-slate-500 bg-slate-950 border-slate-800 px-4 py-2 rounded-full font-mono text-xs">{lang === "en" ? "No isolation plan" : "Aucun plan d'isolement"}</Badge>
+            <Badge variant="outline" className="text-muted-foreground bg-background border-border px-4 py-2 rounded-full font-mono text-xs">{lang === "en" ? "No isolation plan" : "Aucun plan d'isolement"}</Badge>
           )}
         </div>
       </div>
@@ -460,260 +429,76 @@ function TechInfoTab({ eq }: { eq: Equipment }) {
 
 function PressureCell({ label, value, accent }: { label: string; value: number | null | undefined; accent?: boolean }) {
   return (
-    <div className="border border-slate-800 rounded-2xl bg-slate-950/60 p-5 shadow-inner">
-      <div className="text-[11px] uppercase tracking-widest text-slate-400 mb-2 font-mono leading-snug">{label}</div>
-      <div className={`font-mono font-extrabold ${accent ? "text-cyan-400 text-3xl" : "text-white text-2xl"}`}>
+    <div className="border border-border rounded-2xl bg-secondary/60 p-5 shadow-inner">
+      <div className="text-[11px] uppercase tracking-widest text-muted-foreground mb-2 font-mono leading-snug">{label}</div>
+      <div className={`font-mono font-extrabold ${accent ? "text-cyan-700 dark:text-cyan-400 text-3xl" : "text-foreground text-2xl"}`}>
         {value != null ? `${value} bar` : "—"}
       </div>
     </div>
   );
 }
 
-interface TestRecord {
-  id?: string;
-  tag: string;
-  train: string;
-  last_tested: string | null;
-  next_test_due: string | null;
-  updated_at?: string;
-}
-
 function TestDatesEditor({ tag, initialLast, initialNext }: { tag: string; initialLast: string; initialNext: string }) {
-  const { t, lang } = useI18n();
-  const [records, setRecords] = useState<TestRecord[]>([]);
+  const { lang } = useI18n();
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const [last, setLast] = useState(initialLast);
+  const [next, setNext] = useState(initialNext);
   const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
   const [loaded, setLoaded] = useState(false);
-  const [expanded, setExpanded] = useState(true);
-  const [editingId, setEditingId] = useState<string | null>(null);
-
-  const [editTrain, setEditTrain] = useState("T100");
-  const [editLast, setEditLast] = useState<Date | undefined>(undefined);
-  const [editNext, setEditNext] = useState<Date | undefined>(undefined);
+  const L = (en: string, fr: string) => lang === "fr" ? fr : en;
 
   useEffect(() => {
     let active = true;
-    (async () => {
-      const { data } = await supabase
-        .from("equipment_test_dates")
-        .select("id, tag, train, last_tested, next_test_due, updated_at")
-        .eq("tag", tag)
-        .order("created_at", { ascending: false });
-      if (active && data) {
-        setRecords(data as TestRecord[]);
-      }
-      if (active) setLoaded(true);
-    })();
+    setLoaded(false);
+    if (!isSupabaseConfigured) { setLoaded(true); return; }
+    supabase.from("equipment_test_dates").select("tag, last_tested, next_test_due").eq("tag", tag).maybeSingle().then(({ data, error }) => {
+      if (!active) return;
+      if (data) { setLast(data.last_tested ?? ""); setNext(data.next_test_due ?? ""); }
+      if (error) setMessage(error.message);
+      setLoaded(true);
+    });
     return () => { active = false; };
   }, [tag]);
 
-  const startEdit = (record: TestRecord) => {
-    setEditingId(record.id ?? null);
-    setEditTrain(record.train || "T100");
-    setEditLast(record.last_tested ? safeParse(record.last_tested) : undefined);
-    setEditNext(record.next_test_due ? safeParse(record.next_test_due) : undefined);
-  };
-
-  const cancelEdit = () => {
-    setEditingId(null);
-    setEditTrain("T100");
-    setEditLast(undefined);
-    setEditNext(undefined);
-  };
-
-  const saveRecord = async () => {
-    if (!editTrain) return;
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!user || saving) return;
+    if (last && next && next < last) { setMessage(L("The due date cannot precede the last test.", "L'échéance ne peut précéder le dernier essai.")); return; }
     setSaving(true);
-
-    const payload = {
-      tag,
-      train: editTrain,
-      last_tested: editLast ? format(editLast, "yyyy-MM-dd") : null,
-      next_test_due: editNext ? format(editNext, "yyyy-MM-dd") : null,
-      updated_at: new Date().toISOString(),
-    };
-
-    let error;
-    if (editingId) {
-      const { error: updateError } = await supabase
-        .from("equipment_test_dates")
-        .update(payload)
-        .eq("id", editingId);
-      error = updateError;
-    } else {
-      const { error: insertError } = await supabase
-        .from("equipment_test_dates")
-        .insert(payload);
-      error = insertError;
-    }
-
-    setSaving(false);
-
-    if (error) {
-      toast({ title: lang === "en" ? "Save failed" : "Échec d'enregistrement", description: error.message, variant: "destructive" });
-      return;
-    }
-
-    toast({ title: editingId ? (lang === "en" ? "Updated" : "Mis à jour") : (lang === "en" ? "Saved" : "Enregistré") });
-    cancelEdit();
-    const { data } = await supabase
-      .from("equipment_test_dates")
-      .select("id, tag, train, last_tested, next_test_due, updated_at")
-      .eq("tag", tag)
-      .order("created_at", { ascending: false });
-    setRecords(data as TestRecord[] ?? []);
-  };
-
-  const deleteRecord = async (id: string) => {
-    if (!confirm(lang === "en" ? "Delete this test record?" : "Supprimer cet enregistrement de test ?")) return;
-    const { error } = await supabase
-      .from("equipment_test_dates")
-      .delete()
-      .eq("id", id);
-    if (error) {
-      toast({ title: lang === "en" ? "Delete failed" : "Échec de suppression", description: error.message, variant: "destructive" });
-      return;
-    }
-    setRecords((prev) => prev.filter((r) => r.id !== id));
-    toast({ title: lang === "en" ? "Deleted" : "Supprimé" });
-  };
-
-  const daysUntil = (nextDue?: string | null) => {
-    if (!nextDue) return null;
+    setMessage("");
     try {
-      return differenceInDays(parseISO(nextDue), new Date());
-    } catch { return null; }
+      const { error } = await supabase.from("equipment_test_dates").upsert({
+        tag, last_tested: last || null, next_test_due: next || null, updated_at: new Date().toISOString(),
+      }, { onConflict: "tag" });
+      if (error) throw error;
+      await queryClient.invalidateQueries({ queryKey: ["maintenance-schedule"] });
+      setMessage(L("Confirmed schedule saved.", "Calendrier confirmé enregistré."));
+      toast({ title: L("Schedule saved", "Calendrier enregistré") });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : L("Unable to save schedule.", "Enregistrement impossible."));
+    } finally { setSaving(false); }
   };
 
-  return (
-    <div className="border border-slate-800 rounded-3xl bg-slate-900/40 p-8 backdrop-blur-sm shadow-xl space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
-            <CalendarIcon className="h-5 w-5" />
-          </div>
-          <h3 className="text-xl font-bold text-white tracking-tight">{t("lastTested")} / {t("nextDue")}</h3>
-          {!loaded && <span className="text-xs text-slate-500 ml-2 animate-pulse font-mono">…</span>}
-        </div>
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => setExpanded((e) => !e)} className="gap-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl px-4 py-2 font-mono text-xs">
-            {expanded ? (lang === "en" ? "Hide" : "Masquer") : (lang === "en" ? "Show" : "Afficher")} ({records.length})
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => { cancelEdit(); setExpanded(true); }} className="gap-1.5 bg-slate-800 border-slate-700 text-slate-200 hover:text-white rounded-xl px-4 py-2 font-mono text-xs">
-            <Plus className="h-4 w-4 text-cyan-400" /> {lang === "en" ? "Add" : "Ajouter"}
-          </Button>
-        </div>
-      </div>
-
-      {expanded && (
-        <div className="space-y-6">
-          {/* Add/Edit Form */}
-          <div className="border border-slate-800 rounded-2xl p-6 bg-slate-950/60 shadow-inner space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-[140px_1fr_1fr_auto] gap-4 items-end">
-              <div>
-                <div className="text-xs font-mono font-bold text-slate-400 mb-2">TRAIN</div>
-                <select
-                  value={editTrain}
-                  onChange={(e) => setEditTrain(e.target.value)}
-                  className="h-12 w-full rounded-xl bg-slate-900 border border-slate-700 px-4 text-sm font-mono text-white focus:border-cyan-500 focus:outline-none transition-colors"
-                >
-                  {TRAINS.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
-              </div>
-              <DatePickerField label={t("lastTested")} date={editLast} onChange={setEditLast} />
-              <DatePickerField label={t("nextDue")} date={editNext} onChange={setEditNext} />
-              <div className="flex gap-2">
-                <Button onClick={saveRecord} disabled={saving} className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold gap-2 h-12 rounded-xl px-6 shadow-lg shadow-cyan-600/20 transition-all font-mono text-xs">
-                  <Save className="h-4 w-4" /> {saving ? "…" : (editingId ? (lang === "en" ? "Update" : "Mettre à jour") : (lang === "en" ? "Save" : "Enregistrer"))}
-                </Button>
-                {(editingId || records.length > 0) && (
-                  <Button variant="ghost" size="icon" onClick={cancelEdit} className="h-12 w-12 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl">
-                    <X className="h-5 w-5" />
-                  </Button>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {records.length === 0 ? (
-            <EmptyState message={lang === "en" ? "No test records yet." : "Aucun enregistrement de test."} />
-          ) : (
-            <div className="divide-y divide-slate-800 bg-slate-950/20 border border-slate-800 rounded-2xl p-2 shadow-inner">
-              {records.map((record) => {
-                const dLeft = daysUntil(record.next_test_due);
-                const isOverdue = dLeft !== null && dLeft < 0;
-                const isDueSoon = dLeft !== null && dLeft >= 0 && dLeft <= 30;
-
-                return (
-                  <div key={record.id} className="p-4 flex items-center justify-between gap-4 hover:bg-slate-900/40 rounded-xl transition-colors">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-3 mb-1.5">
-                        <Badge variant="secondary" className="font-mono text-xs bg-slate-800 text-cyan-400 border border-slate-700 px-3 py-1 rounded-full">{record.train}</Badge>
-                        {record.last_tested && (
-                          <span className="text-xs text-slate-300 font-mono">{lang === "en" ? "Last:" : "Dernier :"} {record.last_tested}</span>
-                        )}
-                        {record.next_test_due && (
-                          <span className={`text-xs font-mono font-bold px-2.5 py-1 rounded-full border ${isOverdue ? "bg-rose-500/10 text-rose-400 border-rose-500/30" : isDueSoon ? "bg-amber-500/10 text-amber-400 border-amber-500/30" : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"}`}>
-                            {lang === "en" ? "Next:" : "Prochain :"} {record.next_test_due}
-                            {dLeft !== null && ` (${dLeft} ${lang === "en" ? "days" : "jours"})`}
-                          </span>
-                        )}
-                      </div>
-                      {record.updated_at && (
-                        <div className="text-[11px] text-slate-500 font-mono">
-                          {lang === "en" ? "Updated:" : "Mis à jour :"} {new Date(record.updated_at).toLocaleString(lang === "en" ? "en-US" : "fr-FR")}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <Button variant="ghost" size="icon" className="h-9 w-9 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl" onClick={() => startEdit(record)}>
-                        <FileText className="h-4 w-4 text-cyan-400" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-9 w-9 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl" onClick={() => record.id && deleteRecord(record.id)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DatePickerField({ label, date, onChange }: { label: string; date: Date | undefined; onChange: (d: Date | undefined) => void }) {
-  const { t } = useI18n();
-  return (
-    <div>
-      <div className="text-xs font-mono font-bold text-slate-400 mb-2">{label}</div>
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button variant="outline" className={cn("w-full justify-start text-left font-mono h-12 bg-slate-900 border-slate-700 text-white rounded-xl text-xs", !date && "text-slate-500")}>
-            <CalendarIcon className="mr-3 h-4 w-4 text-cyan-500" />
-            {date ? format(date, "yyyy-MM-dd") : t("pickDate")}
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-auto p-0 bg-slate-900 border border-slate-800 text-white rounded-2xl shadow-2xl" align="start">
-          <Calendar mode="single" selected={date} onSelect={onChange} initialFocus className={cn("p-4 pointer-events-auto bg-slate-900 rounded-2xl")} />
-        </PopoverContent>
-      </Popover>
-    </div>
-  );
-}
-
-function safeParse(s: string): Date | undefined {
-  try { return parseISO(s); } catch { return undefined; }
+  return <section className="rounded-xl border border-border bg-card p-5 text-card-foreground sm:p-6">
+    <h3 className="font-display font-semibold">{L("Confirm schedule override", "Confirmer une échéance manuelle")}</h3>
+    <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{L("Use the approved maintenance plan. A confirmed due date takes priority over automatically calculated dates.", "Utilisez le plan de maintenance approuvé. Une échéance confirmée remplace les dates calculées automatiquement.")}</p>
+    {!user ? <p className="mt-4 text-sm text-muted-foreground"><Link to="/auth" className="text-cyan-700 underline dark:text-cyan-400">{L("Sign in", "Connectez-vous")}</Link> {L("to edit confirmed dates.", "pour modifier les dates confirmées.")}</p> :
+      <form onSubmit={save} className="mt-5 grid gap-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+        <label className="space-y-2 text-xs font-medium">{L("Last passed test", "Dernier essai réussi")}<Input type="date" value={last} onChange={(event) => setLast(event.target.value)} disabled={!loaded || saving} className="h-11 bg-background" /></label>
+        <label className="space-y-2 text-xs font-medium">{L("Confirmed next due", "Prochaine échéance confirmée")}<Input type="date" value={next} min={last || undefined} onChange={(event) => setNext(event.target.value)} disabled={!loaded || saving} className="h-11 bg-background" /></label>
+        <Button type="submit" disabled={!loaded || saving} className="h-11 bg-cyan-700 text-white hover:bg-cyan-600"><Save className="h-4 w-4" />{saving ? L("Saving…", "Enregistrement…") : L("Save dates", "Enregistrer")}</Button>
+      </form>}
+    {message && <p role="status" className="mt-3 text-sm text-muted-foreground">{message}</p>}
+  </section>;
 }
 
 function Field({ label, value, mono, accent }: { label: string; value: string | number; mono?: boolean; accent?: boolean }) {
   return (
-    <div className="border border-slate-800 rounded-2xl bg-slate-900/50 p-5 shadow-lg backdrop-blur-sm hover:border-slate-700 transition-all">
-      <div className="text-xs uppercase tracking-wider text-slate-400 mb-2 font-mono font-medium">{label}</div>
-      <div className={`text-xl font-bold tracking-tight ${mono ? "font-mono" : "font-display"} ${accent ? "text-cyan-400 text-2xl font-extrabold" : "text-white"}`}>
+    <div className="border border-border rounded-2xl bg-secondary/50 p-5 shadow-lg backdrop-blur-sm hover:border-border transition-all">
+      <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2 font-mono font-medium">{label}</div>
+      <div className={`text-xl font-bold tracking-tight ${mono ? "font-mono" : "font-display"} ${accent ? "text-cyan-700 dark:text-cyan-400 text-2xl font-extrabold" : "text-foreground"}`}>
         {value || "—"}
       </div>
     </div>
@@ -722,16 +507,16 @@ function Field({ label, value, mono, accent }: { label: string; value: string | 
 
 function BigStat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
-    <div className={`border rounded-3xl p-6 backdrop-blur-sm shadow-xl transition-all ${accent ? "border-cyan-500/40 bg-cyan-500/10 shadow-cyan-500/10" : "border-slate-800 bg-slate-900/40"}`}>
-      <div className="text-xs uppercase tracking-widest text-slate-400 mb-2 font-mono font-bold">{label}</div>
-      <div className={`text-3xl font-extrabold font-mono tracking-tight ${accent ? "text-cyan-400" : "text-white"}`}>{value}</div>
+    <div className={`border rounded-3xl p-6 backdrop-blur-sm shadow-xl transition-all ${accent ? "border-cyan-500/40 bg-cyan-500/10 shadow-cyan-500/10" : "border-border bg-secondary/40"}`}>
+      <div className="text-xs uppercase tracking-widest text-muted-foreground mb-2 font-mono font-bold">{label}</div>
+      <div className={`text-3xl font-extrabold font-mono tracking-tight ${accent ? "text-cyan-700 dark:text-cyan-400" : "text-foreground"}`}>{value}</div>
     </div>
   );
 }
 
 function EmptyState({ message }: { message: string }) {
   return (
-    <div className="border border-dashed border-slate-800 rounded-3xl p-12 text-center text-slate-500 font-mono bg-slate-950/40 shadow-inner text-sm">
+    <div className="border border-dashed border-border rounded-3xl p-12 text-center text-muted-foreground font-mono bg-secondary/40 shadow-inner text-sm">
       {message}
     </div>
   );
@@ -739,10 +524,10 @@ function EmptyState({ message }: { message: string }) {
 
 function riskTierStyle(tier: RiskTier) {
   switch (tier) {
-    case "CRITICAL": return { text: "text-rose-400", bg: "bg-rose-500/10", border: "border-rose-500/40" };
-    case "HIGH":      return { text: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/40" };
-    case "MEDIUM":    return { text: "text-sky-400", bg: "bg-sky-500/10", border: "border-sky-500/40" };
-    default:          return { text: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/40" };
+    case "CRITICAL": return { text: "text-rose-700 dark:text-rose-400", bg: "bg-rose-500/10", border: "border-rose-500/40" };
+    case "HIGH":      return { text: "text-amber-700 dark:text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/40" };
+    case "MEDIUM":    return { text: "text-sky-700 dark:text-sky-400", bg: "bg-sky-500/10", border: "border-sky-500/40" };
+    default:          return { text: "text-emerald-700 dark:text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/40" };
   }
 }
 
@@ -760,8 +545,8 @@ function EngineeringJudgmentTab({ judgment, lang, tag }: { judgment: ReturnType<
   return (
     <div className="space-y-6">
       {/* Disclaimer banner */}
-      <div className="flex items-start gap-3 p-4 rounded-2xl bg-slate-900/60 border border-slate-800 text-xs text-slate-400 font-mono leading-relaxed">
-        <Info className="h-4 w-4 text-slate-500 shrink-0 mt-0.5" />
+      <div className="flex items-start gap-3 p-4 rounded-2xl bg-secondary/60 border border-border text-xs text-muted-foreground font-mono leading-relaxed">
+        <Info className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
         <p>
           {L(
             "This is a rule-based engineering judgment derived from the real design pressure, mass, volume, unit-service, and spare-parts material records in the master database — not a statistical ML prediction. It cites the source field for every conclusion so a QA/QC engineer can verify it.",
@@ -773,24 +558,24 @@ function EngineeringJudgmentTab({ judgment, lang, tag }: { judgment: ReturnType<
       {/* Risk tier + Ask AI */}
       <div className="flex flex-col md:flex-row gap-4">
         <div className={`flex-1 border rounded-3xl p-6 backdrop-blur-sm shadow-xl ${rs.bg} ${rs.border}`}>
-          <div className="text-xs uppercase tracking-widest text-slate-400 mb-2 font-mono font-bold flex items-center gap-2">
-            <AlertOctagon className="h-4 w-4" /> {L("Risk Tier", "Niveau de Risque")}
+          <div className="text-xs uppercase tracking-widest text-muted-foreground mb-2 font-mono font-bold flex items-center gap-2">
+            <AlertOctagon className="h-4 w-4" /> {L("Review priority", "Priorité de revue")}
           </div>
           <div className={`text-4xl font-extrabold font-mono tracking-tight ${rs.text}`}>{judgment.riskTier}</div>
         </div>
         <button
           onClick={askAi}
-          className="flex-1 flex items-center justify-center gap-2 rounded-3xl bg-gradient-to-r from-cyan-600/20 to-blue-600/20 border border-cyan-500/40 text-cyan-300 hover:from-cyan-600/30 hover:to-blue-600/30 transition-all cursor-pointer font-mono text-sm font-bold p-6"
+          className="flex-1 flex items-center justify-center gap-2 rounded-3xl bg-gradient-to-r from-cyan-600/20 to-blue-600/20 border border-cyan-500/40 text-cyan-700 dark:text-cyan-300 hover:from-cyan-600/30 hover:to-blue-600/30 transition-all cursor-pointer font-mono text-sm font-bold p-6"
         >
-          <Sparkles className="h-5 w-5 text-cyan-400" /> {L("Ask AI Expert to explain this judgment", "Demander à l'Expert IA d'expliquer ce jugement")}
+          <Sparkles className="h-5 w-5 text-cyan-700 dark:text-cyan-400" /> {L("Ask AI Expert to explain this judgment", "Demander à l'Expert IA d'expliquer ce jugement")}
         </button>
       </div>
 
       {/* Process Service */}
-      <div className="border border-slate-800 rounded-3xl bg-slate-900/40 p-8 backdrop-blur-sm shadow-xl">
+      <div className="border border-border rounded-3xl bg-secondary/40 p-8 backdrop-blur-sm shadow-xl">
         <div className="flex items-center gap-3 mb-4">
-          <div className="p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-400"><Beaker className="h-5 w-5" /></div>
-          <h3 className="text-xl font-bold text-white tracking-tight">{L("Process Service Profile", "Profil du Service Procédé")}</h3>
+          <div className="p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-700 dark:text-purple-400"><Beaker className="h-5 w-5" /></div>
+          <h3 className="text-xl font-bold text-foreground tracking-tight">{L("Process Service Profile", "Profil du Service Procédé")}</h3>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <Field label={L("Fluid In Contact", "Fluide en Contact")} value={L(judgment.service.fluidEn, judgment.service.fluidFr)} />
@@ -800,10 +585,10 @@ function EngineeringJudgmentTab({ judgment, lang, tag }: { judgment: ReturnType<
       </div>
 
       {/* Pressure Analysis */}
-      <div className="border border-slate-800 rounded-3xl bg-slate-900/40 p-8 backdrop-blur-sm shadow-xl">
+      <div className="border border-border rounded-3xl bg-secondary/40 p-8 backdrop-blur-sm shadow-xl">
         <div className="flex items-center gap-3 mb-4">
-          <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400"><Gauge className="h-5 w-5" /></div>
-          <h3 className="text-xl font-bold text-white tracking-tight">{L("Pressure & Code Margin Analysis", "Analyse de Pression & Marge de Code")}</h3>
+          <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-700 dark:text-cyan-400"><Gauge className="h-5 w-5" /></div>
+          <h3 className="text-xl font-bold text-foreground tracking-tight">{L("Pressure & Code Margin Analysis", "Analyse de Pression & Marge de Code")}</h3>
         </div>
         {judgment.pressure.dataMissing ? (
           <EmptyState message={L("Design/test pressure not recorded for this asset in the master database.", "Pression de calcul/épreuve non enregistrée pour cet équipement.")} />
@@ -861,19 +646,19 @@ function EngineeringJudgmentTab({ judgment, lang, tag }: { judgment: ReturnType<
 
       {/* Materials from real spare-parts records */}
       {judgment.materials.length > 0 && (
-        <div className="border border-slate-800 rounded-3xl bg-slate-900/40 p-8 backdrop-blur-sm shadow-xl">
+        <div className="border border-border rounded-3xl bg-secondary/40 p-8 backdrop-blur-sm shadow-xl">
           <div className="flex items-center gap-3 mb-4">
-            <div className="p-2.5 rounded-xl bg-slate-500/10 border border-slate-500/30 text-slate-300"><Package className="h-5 w-5" /></div>
-            <h3 className="text-xl font-bold text-white tracking-tight">{L("Materials of Construction (from PDR)", "Matériaux de Construction (depuis PDR)")}</h3>
+            <div className="p-2.5 rounded-xl bg-slate-500/10 border border-slate-500/30 text-muted-foreground"><Package className="h-5 w-5" /></div>
+            <h3 className="text-xl font-bold text-foreground tracking-tight">{L("Materials of Construction (from PDR)", "Matériaux de Construction (depuis PDR)")}</h3>
           </div>
           <div className="flex flex-wrap gap-2">
             {judgment.materials.map((m) => (
-              <span key={m} className="font-mono text-xs bg-slate-800 border border-slate-700 text-slate-300 px-3 py-1.5 rounded-xl">{m}</span>
+              <span key={m} className="font-mono text-xs bg-secondary border border-border text-muted-foreground px-3 py-1.5 rounded-xl">{m}</span>
             ))}
           </div>
           {judgment.representativeBoltSize && (
-            <p className="text-xs text-slate-500 font-mono mt-4">
-              {L("Representative bolting/gasket size:", "Taille de boulonnage/joint représentative :")} <span className="text-white font-bold">{judgment.representativeBoltSize}</span>
+            <p className="text-xs text-muted-foreground font-mono mt-4">
+              {L("Representative bolting/gasket size:", "Taille de boulonnage/joint représentative :")} <span className="text-foreground font-bold">{judgment.representativeBoltSize}</span>
             </p>
           )}
         </div>
@@ -884,21 +669,21 @@ function EngineeringJudgmentTab({ judgment, lang, tag }: { judgment: ReturnType<
 
 function JudgmentListCard({ icon, color, title, items, lang }: { icon: React.ReactNode; color: string; title: string; items: { en: string; fr: string }[]; lang: string }) {
   const colorMap: Record<string, { text: string; bg: string; border: string }> = {
-    emerald: { text: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/30" },
-    rose:    { text: "text-rose-400", bg: "bg-rose-500/10", border: "border-rose-500/30" },
-    amber:   { text: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/30" },
-    sky:     { text: "text-sky-400", bg: "bg-sky-500/10", border: "border-sky-500/30" },
+    emerald: { text: "text-emerald-700 dark:text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/30" },
+    rose:    { text: "text-rose-700 dark:text-rose-400", bg: "bg-rose-500/10", border: "border-rose-500/30" },
+    amber:   { text: "text-amber-700 dark:text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/30" },
+    sky:     { text: "text-sky-700 dark:text-sky-400", bg: "bg-sky-500/10", border: "border-sky-500/30" },
   };
   const c = colorMap[color] ?? colorMap.emerald;
   return (
-    <div className="border border-slate-800 rounded-3xl bg-slate-900/40 p-8 backdrop-blur-sm shadow-xl">
+    <div className="border border-border rounded-3xl bg-secondary/40 p-8 backdrop-blur-sm shadow-xl">
       <div className="flex items-center gap-3 mb-4">
         <div className={`p-2.5 rounded-xl ${c.bg} border ${c.border} ${c.text}`}>{icon}</div>
-        <h3 className="text-xl font-bold text-white tracking-tight">{title}</h3>
+        <h3 className="text-xl font-bold text-foreground tracking-tight">{title}</h3>
       </div>
       <ul className="space-y-3">
         {items.map((item, i) => (
-          <li key={i} className="flex items-start gap-3 text-sm text-slate-300 font-light leading-relaxed">
+          <li key={i} className="flex items-start gap-3 text-sm text-muted-foreground font-light leading-relaxed">
             <span className={`mt-1.5 h-1.5 w-1.5 rounded-full shrink-0 ${c.bg} border ${c.border}`} />
             <span>{lang === "fr" ? item.fr : item.en}</span>
           </li>
@@ -918,38 +703,38 @@ function PdrTab({ parts, tag }: { parts: SparePart[]; tag: string }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col md:flex-row gap-4 bg-slate-900/40 border border-slate-800 rounded-2xl p-4 backdrop-blur-sm shadow-lg">
+      <div className="flex flex-col md:flex-row gap-4 bg-secondary/40 border border-border rounded-2xl p-4 backdrop-blur-sm shadow-lg">
         <div className="relative flex-1">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("search")} className="pl-10 h-11 bg-slate-950 border-slate-800 text-white rounded-xl font-mono text-xs placeholder:text-slate-500 focus:border-cyan-500 focus:outline-none" />
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("search")} className="pl-10 h-11 bg-background border-border text-foreground rounded-xl font-mono text-xs placeholder:text-muted-foreground focus:border-cyan-500 focus:outline-none" />
         </div>
         <Button
           variant="outline"
-          className="bg-slate-800 border-slate-700 text-slate-200 hover:text-white rounded-xl py-5 shadow-md font-mono text-xs gap-2 cursor-pointer"
+          className="bg-secondary border-border text-foreground hover:text-foreground rounded-xl py-5 shadow-md font-mono text-xs gap-2 cursor-pointer"
           onClick={() => exportToCsv(`${tag}_parts.csv`, list.map((p) => ({
             code: p.code, description: p.description, category: p.category ?? "", qty: p.qty_installed,
             location: p.stock_location ?? "", material: p.material ?? "", size: p.size_nominal ?? "",
           })))}
         >
-          <Download className="h-4 w-4 text-cyan-400" /> {t("exportCsv")}
+          <Download className="h-4 w-4 text-cyan-700 dark:text-cyan-400" /> {t("exportCsv")}
         </Button>
       </div>
 
-      <div className="border border-slate-800 rounded-3xl overflow-hidden bg-slate-900/40 shadow-2xl backdrop-blur-sm">
-        <div className="hidden md:grid grid-cols-[140px_1fr_160px_80px_120px] bg-slate-950/60 text-xs uppercase tracking-wider text-slate-400 px-6 py-4 font-bold font-mono border-b border-slate-800">
+      <div className="border border-border rounded-3xl overflow-hidden bg-secondary/40 shadow-2xl backdrop-blur-sm">
+        <div className="hidden md:grid grid-cols-[140px_1fr_160px_80px_120px] bg-secondary/60 text-xs uppercase tracking-wider text-muted-foreground px-6 py-4 font-bold font-mono border-b border-border">
           <div>{t("code")}</div><div>{t("description")}</div><div>{t("category")}</div><div className="text-right">{t("qty")}</div><div>{t("location")}</div>
         </div>
-        <div className="divide-y divide-slate-800 bg-slate-950/20">
+        <div className="divide-y divide-border bg-card/20">
           {list.map((p, i) => (
-            <div key={`${p.code}-${i}`} className="grid grid-cols-1 md:grid-cols-[140px_1fr_160px_80px_120px] gap-2 md:gap-0 px-6 py-4 text-sm hover:bg-slate-800/40 transition-colors">
-              <div className="font-mono text-xs text-cyan-400 font-bold">{p.code}</div>
-              <div className="text-sm text-slate-200 font-light leading-relaxed">{p.description}</div>
-              <div className="text-xs text-slate-400 font-mono">{p.category || "—"}</div>
-              <div className="md:text-right font-mono font-bold text-white">{p.qty_installed}</div>
-              <div className="text-xs font-mono text-slate-400">{p.stock_location || "—"}</div>
+            <div key={`${p.code}-${i}`} className="grid grid-cols-1 md:grid-cols-[140px_1fr_160px_80px_120px] gap-2 md:gap-0 px-6 py-4 text-sm hover:bg-secondary/40 transition-colors">
+              <div className="font-mono text-xs text-cyan-700 dark:text-cyan-400 font-bold">{p.code}</div>
+              <div className="text-sm text-foreground font-light leading-relaxed">{p.description}</div>
+              <div className="text-xs text-muted-foreground font-mono">{p.category || "—"}</div>
+              <div className="md:text-right font-mono font-bold text-foreground">{p.qty_installed}</div>
+              <div className="text-xs font-mono text-muted-foreground">{p.stock_location || "—"}</div>
             </div>
           ))}
-          {list.length === 0 && <div className="px-6 py-12 text-center text-slate-400 font-mono text-sm">{t("noResults")}</div>}
+          {list.length === 0 && <div className="px-6 py-12 text-center text-muted-foreground font-mono text-sm">{t("noResults")}</div>}
         </div>
       </div>
     </div>
@@ -975,23 +760,23 @@ function ToolsTab({ boltSize, wrench, tools, liftingMethod, extraTools }: { bolt
         <BigStat label={t("liftingMethod")} value={liftingMethod.replace(/_/g, " ")} />
       </div>
 
-      <div className="border border-slate-800 rounded-3xl bg-slate-900/40 p-8 backdrop-blur-sm shadow-xl">
+      <div className="border border-border rounded-3xl bg-secondary/40 p-8 backdrop-blur-sm shadow-xl">
         <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
+            <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-700 dark:text-cyan-400">
               <Wrench className="h-5 w-5" />
             </div>
-            <h3 className="text-xl font-bold text-white tracking-tight">{t("recommendedTools")}</h3>
+            <h3 className="text-xl font-bold text-foreground tracking-tight">{t("recommendedTools")}</h3>
           </div>
-          <Button onClick={copy} variant="outline" size="sm" className="bg-slate-800 border-slate-700 text-slate-200 hover:text-white rounded-xl py-5 px-5 font-mono text-xs gap-2 cursor-pointer shadow-md">
-            {copied ? <Check className="h-4 w-4 text-emerald-400 animate-bounce" /> : <Copy className="h-4 w-4 text-cyan-400" />}
+          <Button onClick={copy} variant="outline" size="sm" className="bg-secondary border-border text-foreground hover:text-foreground rounded-xl py-5 px-5 font-mono text-xs gap-2 cursor-pointer shadow-md">
+            {copied ? <Check className="h-4 w-4 text-emerald-700 dark:text-emerald-400 animate-bounce" /> : <Copy className="h-4 w-4 text-cyan-700 dark:text-cyan-400" />}
             {copied ? t("copied") : t("copyToolList")}
           </Button>
         </div>
-        <ol className="divide-y divide-slate-800 bg-slate-950/60 p-4 rounded-2xl border border-slate-800/80 shadow-inner">
+        <ol className="divide-y divide-border bg-secondary/60 p-4 rounded-2xl border border-border shadow-inner">
           {allTools.map((tool, i) => (
-            <li key={i} className="flex items-center gap-4 text-sm py-3.5 px-4 text-slate-200 hover:bg-slate-900/80 rounded-xl transition-colors">
-              <span className="font-mono text-xs font-bold bg-slate-800 border border-slate-700 text-cyan-400 w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-sm">{String(i + 1).padStart(2, "0")}</span>
+            <li key={i} className="flex items-center gap-4 text-sm py-3.5 px-4 text-foreground hover:bg-card/80 rounded-xl transition-colors">
+              <span className="font-mono text-xs font-bold bg-secondary border border-border text-cyan-700 dark:text-cyan-400 w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-sm">{String(i + 1).padStart(2, "0")}</span>
               <span className="font-light leading-relaxed">{tool}</span>
             </li>
           ))}

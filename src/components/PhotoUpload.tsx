@@ -1,50 +1,47 @@
 import { useRef, useState } from "react";
-import { Camera, Upload, Image as ImageIcon } from "lucide-react";
+import { Camera, Upload, Image as ImageIcon, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { compressToWebP } from "@/lib/imageCompress";
-import { idb } from "@/lib/db";
+import { idb, type PendingUpload } from "@/lib/db";
+import { flushQueue } from "@/lib/sync";
 import { toast } from "@/hooks/use-toast";
 import { useI18n } from "@/contexts/I18nContext";
 
 export function PhotoUpload({ tag, onUploaded }: { tag: string; onUploaded?: () => void }) {
   const { user } = useAuth();
   const { lang } = useI18n();
+  const L = (en: string, fr: string) => lang === "fr" ? fr : en;
   const cameraRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
 
-  const handle = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handle = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || busy) return;
     setBusy(true);
     try {
+      if (!user) throw new Error(L("Sign in before uploading a photo.", "Connectez-vous avant d'envoyer une photo."));
       const blob = await compressToWebP(file);
-      const fileName = file.name.replace(/\.[^.]+$/, "") + ".webp";
-
-      if (!navigator.onLine || !user) {
-        await idb.pendingUploads.add({
-          tag, file_name: fileName, mime_type: "image/webp",
-          blob, uploaded_by: user?.id ?? null, created_at: new Date().toISOString(),
-        });
-        toast({ title: lang === "en" ? "Queued offline" : "Mise en file d'attente hors-ligne", description: lang === "en" ? "Photo will upload when online." : "La photo sera synchronisée une fois en ligne." });
-      } else {
-        const path = `${tag}/${Date.now()}-${fileName}`;
-        const { error: upErr } = await supabase.storage.from("equipment-photos").upload(path, blob, {
-          contentType: "image/webp",
-        });
-        if (upErr) throw upErr;
-        const { error: insErr } = await supabase.from("equipment_images").insert({
-          tag, file_path: path, file_name: fileName,
-          mime_type: "image/webp", size_bytes: blob.size, uploaded_by: user.id,
-        });
-        if (insErr) throw insErr;
-        toast({ title: lang === "en" ? "Photo uploaded" : "Photo importée avec succès" });
-        onUploaded?.();
+      const clientId = crypto.randomUUID();
+      const upload: PendingUpload = {
+        client_id: clientId, upload_path: `${tag}/${clientId}.webp`, tag,
+        file_name: file.name.replace(/\.[^.]+$/, "") + ".webp", mime_type: "image/webp",
+        blob, uploaded_by: user.id, created_at: new Date().toISOString(),
+      };
+      // Persist first. If the browser closes during upload, the same ID/path can
+      // be retried without creating a second image or losing the selected file.
+      const localId = await idb.pendingUploads.add(upload);
+      if (!navigator.onLine) {
+        toast({ title: L("Photo queued on this device", "Photo enregistrée sur cet appareil"), description: L("It will upload after you reconnect and sign in.", "Elle sera envoyée après reconnexion et authentification.") });
+        return;
       }
-    } catch (err) {
-      toast({ title: lang === "en" ? "Upload failed" : "Échec de l'import", description: (err as Error).message, variant: "destructive" });
+      await flushQueue();
+      if (await idb.pendingUploads.get(localId)) throw new Error(L("Upload not confirmed. The photo is kept in the retry queue; use the sync indicator to retry.", "Envoi non confirmé. La photo reste en attente ; utilisez l'indicateur de synchronisation."));
+      toast({ title: L("Photo uploaded", "Photo envoyée") });
+      onUploaded?.();
+    } catch (cause) {
+      toast({ title: L("Photo not uploaded", "Photo non envoyée"), description: cause instanceof Error ? cause.message : L("Try again with a supported image.", "Réessayez avec une image compatible."), variant: "destructive" });
     } finally {
       setBusy(false);
       if (cameraRef.current) cameraRef.current.value = "";
@@ -52,35 +49,16 @@ export function PhotoUpload({ tag, onUploaded }: { tag: string; onUploaded?: () 
     }
   };
 
-  return (
-    <div className="flex flex-wrap gap-2">
-      {/* CAMERA INPUT (capture="environment") */}
-      <input
-        ref={cameraRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        onChange={handle}
-        className="hidden"
-      />
-      {/* GALLERY INPUT (NO capture) */}
-      <input
-        ref={galleryRef}
-        type="file"
-        accept="image/*"
-        onChange={handle}
-        className="hidden"
-      />
-
-      <Button size="sm" variant="outline" disabled={busy} onClick={() => cameraRef.current?.click()} className="gap-2 bg-slate-900 border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl px-4 py-4 font-mono text-xs shadow-md">
-        {busy ? <Upload className="h-4 w-4 animate-pulse text-cyan-400" /> : <Camera className="h-4 w-4 text-cyan-500" />}
-        {busy ? (lang === "en" ? "Uploading…" : "Envoi…") : (lang === "en" ? "Take Photo (Camera)" : "Prendre Photo (Caméra)")}
-      </Button>
-
-      <Button size="sm" variant="outline" disabled={busy} onClick={() => galleryRef.current?.click()} className="gap-2 bg-slate-900 border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl px-4 py-4 font-mono text-xs shadow-md">
-        <ImageIcon className="h-4 w-4 text-amber-500" />
-        {lang === "en" ? "Upload from Gallery" : "Importer de la Galerie"}
-      </Button>
-    </div>
-  );
+  return <div className="flex flex-wrap gap-2">
+    <input ref={cameraRef} type="file" accept="image/*" capture="environment" onChange={handle} className="hidden" aria-label={L("Take equipment photo", "Prendre une photo de l'équipement")} />
+    <input ref={galleryRef} type="file" accept="image/*" onChange={handle} className="hidden" aria-label={L("Choose equipment photo", "Choisir une photo de l'équipement")} />
+    <Button type="button" size="sm" variant="outline" disabled={busy || !user} onClick={() => cameraRef.current?.click()} title={!user ? L("Sign in to upload", "Connectez-vous pour envoyer") : undefined} className="min-h-10 gap-2 text-xs">
+      {busy ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <Camera className="h-4 w-4 text-cyan-600 dark:text-cyan-400" />}
+      {busy ? L("Processing…", "Traitement…") : L("Take photo", "Prendre une photo")}
+    </Button>
+    <Button type="button" size="sm" variant="outline" disabled={busy || !user} onClick={() => galleryRef.current?.click()} className="min-h-10 gap-2 text-xs">
+      {busy ? <Upload className="h-4 w-4" /> : <ImageIcon className="h-4 w-4 text-amber-600 dark:text-amber-400" />}{L("Choose photo", "Choisir une photo")}
+    </Button>
+    {!user && <p className="w-full text-xs text-muted-foreground">{L("Sign in to attach equipment photos.", "Connectez-vous pour joindre des photos.")}</p>}
+  </div>;
 }

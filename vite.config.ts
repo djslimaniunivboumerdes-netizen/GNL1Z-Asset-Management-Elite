@@ -9,12 +9,15 @@ export default defineConfig({
   base: isElectron ? "./" : "/",
 
   server: {
-    host: "::",
+    host: "0.0.0.0",
     port: 8080,
+    allowedHosts: [".e2b.app"],
     hmr: {
       overlay: false,
     },
   },
+
+  preview: { host: "0.0.0.0", port: 8081, allowedHosts: [".e2b.app"] },
 
   plugins: [
     react(),
@@ -28,16 +31,16 @@ export default defineConfig({
         "icon-192x192.png",
         "icon-512x512.png",
       ],
+      manifestFilename: "manifest.webmanifest",
       manifest: {
-        filename: "manifest.json",
         id: "/",
         name: "GNL1Z Asset Integrity Management",
         short_name: "GNL1Z",
         description: "Industrial Asset Management for the GNL1Z Sonatrach AP-C3MR™ liquefaction facility.",
         theme_color: "#0f172a",
-        background_color: "#ffffff",
+        background_color: "#f8fafc",
         display: "standalone",
-        orientation: "portrait",
+        orientation: "any",
         start_url: "/",
         scope: "/",
         icons: [
@@ -51,10 +54,15 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         skipWaiting: true,
-        globPatterns: ["**/*.{js,css,html,ico,woff,woff2}"],
+        globPatterns: ["**/*.{js,css,html,ico,woff,woff2,webp}"],
+        navigateFallback: "/index.html",
+        // Auth must never be fulfilled from a cached application shell.
+        navigateFallbackDenylist: [/^\/auth\//],
+        // Do not precache public PDFs/drawings; cache them on first use instead.
+        globIgnores: ["**/pfd/**", "**/images/**", "**/pdf/**"],
         runtimeCaching: [
           {
-            urlPattern: /\.(png|jpg|jpeg|svg|webp)$/i,
+            urlPattern: ({ url, sameOrigin }) => sameOrigin && /\.(png|jpg|jpeg|svg|webp)$/i.test(url.pathname),
             handler: "CacheFirst",
             options: {
               cacheName: "images-cache",
@@ -65,31 +73,13 @@ export default defineConfig({
             },
           },
           {
-            urlPattern: /\.pdf$/i,
+            urlPattern: ({ url, sameOrigin }) => sameOrigin && /\.pdf$/i.test(url.pathname),
             handler: "CacheFirst",
             options: {
               cacheName: "pdf-cache",
               expiration: {
                 maxEntries: 100,
                 maxAgeSeconds: 60 * 60 * 24 * 30,
-              },
-            },
-          },
-          {
-            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-            handler: "StaleWhileRevalidate",
-            options: {
-              cacheName: "google-fonts-stylesheets",
-            },
-          },
-          {
-            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "google-fonts-webfonts",
-              expiration: {
-                maxEntries: 20,
-                maxAgeSeconds: 60 * 60 * 24 * 365,
               },
             },
           },

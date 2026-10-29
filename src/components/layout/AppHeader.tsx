@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { Moon, Sun, Languages, LogIn, LogOut, Settings, UserCircle2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -11,6 +12,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Badge } from "@/components/ui/badge";
 import { META } from "@/data";
 import { useNavigate } from "react-router-dom";
+import { GlobalSearch } from "@/components/GlobalSearch";
 import { QrScannerButton } from "@/components/QrScannerButton";
 import { OnlineStatus } from "@/components/OnlineStatus";
 import sonatrachLogo from "@/assets/sonatrach-logo.png";
@@ -94,15 +96,15 @@ function UserMenu({ user }: { user: User }) {
         </button>
       </DropdownMenuTrigger>
 
-      <DropdownMenuContent align="end" className="w-64 bg-slate-900 border border-slate-800 text-slate-100 shadow-2xl rounded-2xl p-2">
+      <DropdownMenuContent align="end" className="w-64 bg-popover border border-border text-popover-foreground shadow-2xl rounded-2xl p-2">
         <DropdownMenuLabel className="font-normal pb-3 pt-2 px-3">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-full overflow-hidden ring-2 ring-slate-700 shrink-0">
               <Avatar user={user} />
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-bold truncate text-white tracking-tight">{displayName}</p>
-              <p className="text-[11px] text-slate-400 font-mono truncate">{user.email}</p>
+              <p className="text-sm font-bold truncate text-foreground tracking-tight">{displayName}</p>
+              <p className="text-[11px] text-muted-foreground font-mono truncate">{user.email}</p>
               {isGoogle && (
                 <span className="inline-flex items-center gap-1.5 text-[10px] text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 px-2 py-0.5 rounded-full mt-1.5 font-mono">
                   <Zap className="h-2.5 w-2.5" /> Google OAuth
@@ -112,10 +114,10 @@ function UserMenu({ user }: { user: User }) {
           </div>
         </DropdownMenuLabel>
 
-        <DropdownMenuSeparator className="bg-slate-800 my-1" />
+        <DropdownMenuSeparator className="bg-border my-1" />
 
         <DropdownMenuItem
-          className="cursor-pointer gap-2.5 text-sm py-2.5 px-3 hover:bg-slate-800/80 rounded-xl transition-colors text-slate-300 hover:text-white"
+          className="cursor-pointer gap-2.5 text-sm py-2.5 px-3 hover:bg-accent/10 rounded-xl transition-colors text-foreground hover:text-foreground"
           onClick={() => navigate("/author")}
         >
           <UserCircle2 className="h-4 w-4 text-cyan-400" />
@@ -123,18 +125,18 @@ function UserMenu({ user }: { user: User }) {
         </DropdownMenuItem>
 
         <DropdownMenuItem
-          className="cursor-pointer gap-2.5 text-sm py-2.5 px-3 hover:bg-slate-800/80 rounded-xl transition-colors text-slate-300 hover:text-white"
+          className="cursor-pointer gap-2.5 text-sm py-2.5 px-3 hover:bg-accent/10 rounded-xl transition-colors text-foreground hover:text-foreground"
           onClick={() => navigate("/download")}
         >
           <Settings className="h-4 w-4 text-amber-400" />
           {t("appDownloads")}
         </DropdownMenuItem>
 
-        <DropdownMenuSeparator className="bg-slate-800 my-1" />
+        <DropdownMenuSeparator className="bg-border my-1" />
 
         <DropdownMenuItem
           className="cursor-pointer gap-2.5 text-sm py-2.5 px-3 hover:bg-rose-500/20 text-rose-400 rounded-xl transition-colors focus:text-rose-300 focus:bg-rose-500/30"
-          onClick={signOut}
+          onClick={() => { void signOut().catch(() => navigate("/auth")); }}
         >
           <LogOut className="h-4 w-4" />
           {t("signOut")}
@@ -145,52 +147,28 @@ function UserMenu({ user }: { user: User }) {
 }
 
 export function AppHeader() {
-  const { theme, toggle }            = useTheme();
+  const { theme, toggle } = useTheme();
   const { lang, toggle: toggleLang, t } = useI18n();
-  const { user }                     = useAuth();
-  const navigate                     = useNavigate();
-
+  const { user } = useAuth();
+  const navigate = useNavigate();
   return (
-    <header className="h-16 border-b border-slate-800 bg-slate-950/80 backdrop-blur-xl sticky top-0 z-30 flex items-center px-4 md:px-8 gap-4 shadow-lg">
-      <SidebarTrigger className="text-slate-400 hover:text-cyan-400 transition-colors" />
-
-      <img src={sonatrachLogo} alt="Sonatrach" className="h-9 w-auto md:hidden" />
-
-      <div className="hidden md:flex items-center gap-4 min-w-0">
-        <img src={sonatrachLogo} alt="Sonatrach" className="h-10 w-auto filter drop-shadow-md" />
-        <div className="h-7 w-px bg-slate-800" />
-        <span className="text-xs uppercase tracking-widest text-cyan-400 font-mono font-bold">{META.project}</span>
-        <span className="text-slate-700">·</span>
-        <span className="text-xs text-slate-300 truncate font-light tracking-wide">{META.location}</span>
+    <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-1.5 border-b border-border bg-background/95 px-3 backdrop-blur-xl sm:gap-2 md:px-6">
+      <SidebarTrigger className="h-9 w-9 shrink-0" />
+      <Link to="/" className="mr-auto flex shrink-0 items-center gap-2 rounded-md" aria-label="GNL1Z dashboard">
+        <img src={sonatrachLogo} alt="Sonatrach" className="h-8 w-8 object-contain" />
+        <span className="hidden text-xs font-semibold tracking-wide min-[420px]:inline xl:hidden">GNL1Z</span>
+      </Link>
+      <div className="mr-auto hidden min-w-0 items-center gap-3 xl:flex">
+        <span className="text-xs font-semibold tracking-wide">{META.project}</span><span className="h-4 w-px bg-border" />
+        <span className="truncate text-xs text-muted-foreground">{META.location}</span>
       </div>
-
-      <div className="ml-auto flex items-center gap-3">
+      <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
         <OnlineStatus />
-        <Badge variant="outline" className="hidden sm:inline-flex border-cyan-500/30 text-cyan-400 bg-cyan-500/10 font-mono text-[10px] px-2.5 py-1 rounded-full shadow-inner">
-          {META.process}
-        </Badge>
-        <QrScannerButton onScan={(id) => navigate(`/equipment/${id}`)} />
-        <Button variant="ghost" size="sm" onClick={toggleLang} className="font-mono text-xs gap-1.5 text-slate-300 hover:text-cyan-400 hover:bg-slate-900 rounded-xl px-3 py-2 transition-all">
-          <Languages className="h-4 w-4 text-cyan-500" />
-          {lang.toUpperCase()}
-        </Button>
-        <Button variant="ghost" size="icon" onClick={toggle} aria-label="Toggle theme" className="text-slate-400 hover:text-amber-400 hover:bg-slate-900 rounded-xl transition-all">
-          {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-        </Button>
-
-        {user ? (
-          <UserMenu user={user} />
-        ) : (
-          <Button
-            variant="default"
-            size="sm"
-            onClick={() => navigate("/auth")}
-            className="gap-2 font-mono text-xs bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-lg shadow-cyan-500/20 rounded-xl px-4 py-2 transition-all"
-          >
-            <LogIn className="h-4 w-4" />
-            <span className="hidden sm:inline font-bold">{t("signIn")}</span>
-          </Button>
-        )}
+        <GlobalSearch />
+        <div className="hidden sm:block"><QrScannerButton onScan={(id) => navigate(`/equipment/${encodeURIComponent(id)}`)} /></div>
+        <Button variant="ghost" size="sm" onClick={toggleLang} aria-label={lang === "en" ? "Passer en français" : "Switch to English"} className="h-9 w-9 gap-1 rounded-lg px-0 text-xs font-medium">{lang.toUpperCase()}</Button>
+        <Button variant="ghost" size="icon" onClick={toggle} aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"} className="h-9 w-9 rounded-lg">{theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}</Button>
+        {user ? <UserMenu user={user} /> : <Button size="sm" onClick={() => navigate("/auth")} aria-label={t("signIn")} className="h-9 gap-2 rounded-lg bg-cyan-700 px-2.5 text-white hover:bg-cyan-600"><LogIn className="h-4 w-4" /><span className="hidden md:inline">{t("signIn")}</span></Button>}
       </div>
     </header>
   );

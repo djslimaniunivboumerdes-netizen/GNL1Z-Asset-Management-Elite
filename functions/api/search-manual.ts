@@ -22,11 +22,21 @@ export async function onRequestOptions(): Promise<Response> {
 }
 
 export async function onRequestPost(ctx: { request: Request }): Promise<Response> {
+  const origin = ctx.request.headers.get("Origin");
+  if (origin && origin !== new URL(ctx.request.url).origin) {
+    return Response.json({ error: "Origin not allowed" }, { status: 403, headers: CORS });
+  }
   let query = "", manuals: ManualMeta[] = [];
   try {
-    const body = await ctx.request.json() as { query: string; manuals: ManualMeta[] };
-    query   = (body.query   ?? "").trim();
-    manuals = body.manuals  ?? [];
+    const raw = await ctx.request.text();
+    if (new TextEncoder().encode(raw).length > 64 * 1024) return Response.json({ error: "Request too large" }, { status: 413, headers: CORS });
+    const body = JSON.parse(raw) as { query?: unknown; manuals?: unknown };
+    query = typeof body.query === "string" ? body.query.trim().slice(0, 200) : "";
+    manuals = Array.isArray(body.manuals) ? body.manuals.slice(0, 30).filter((m): m is ManualMeta => {
+      if (!m || typeof m !== "object") return false;
+      const item = m as Record<string, unknown>;
+      return typeof item.id === "string" && typeof item.title === "string" && typeof item.driveId === "string" && /^[A-Za-z0-9_-]{10,100}$/.test(item.driveId);
+    }) : [];
   } catch {
     return Response.json({ error: "Bad request" }, { status: 400, headers: CORS });
   }
@@ -154,7 +164,7 @@ async function inflate(data: Uint8Array): Promise<string> {
   const writer = ds.writable.getWriter();
   const reader = ds.readable.getReader();
 
-  await writer.write(data);
+  await writer.write(new Uint8Array(data));
   await writer.close();
 
   const chunks: Uint8Array[] = [];

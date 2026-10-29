@@ -14,7 +14,8 @@ import {
   User, Eye, EyeOff, RefreshCw,
 } from "lucide-react";
 import sonatrachLogo from "@/assets/sonatrach-logo.png";
-import newsHero from "@/assets/news-hero.jpg";
+import { newsHero as hero } from "@/utils/assets";
+const newsHero = hero.src;
 
 // ─── Password strength ───────────────────────────────────────────────────────
 

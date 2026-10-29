@@ -1,0 +1,20 @@
+{
+  "result": "PASS",
+  "base": "http://127.0.0.1:8081",
+  "checks": [
+    "mobile dashboard renders",
+    "mobile dashboard has no horizontal overflow",
+    "assistant labels static reference boundary",
+    "URL equipment filter renders matching tag",
+    "desktop dashboard has no horizontal overflow",
+    "desktop equipment table renders matching tag",
+    "generated service worker controls page",
+    "generated manifest allows any orientation",
+    "dashboard reloads offline",
+    "lazy equipment detail loads offline",
+    "no runtime errors",
+    "no backend writes"
+  ],
+  "errors": [],
+  "backendWrites": []
+}

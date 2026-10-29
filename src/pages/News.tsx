@@ -11,9 +11,9 @@ import { Badge } from "@/components/ui/badge";
 
 /* ─── HERO SLIDES ─────────────────────────────────────────────────────────── */
 const newsSlides = [
-  { tag: "Market Ops",     image: GNL1Z_ASSETS.units.unit40 },
-  { tag: "Strategic Hub",  image: GNL1Z_ASSETS.units.unit30 },
-  { tag: "Export Terminal",image: GNL1Z_ASSETS.units.unit50 },
+  { tag: "Market Ops", ...GNL1Z_ASSETS.unitImages.unit40 },
+  { tag: "Strategic Hub", ...GNL1Z_ASSETS.unitImages.unit30 },
+  { tag: "Export Terminal", ...GNL1Z_ASSETS.unitImages.unit50 },
 ] as const;
 
 /* ─── NEWS FEED ───────────────────────────────────────────────────────────── */
@@ -208,7 +208,7 @@ const CATEGORIES: Category[] = ["All", "Operations", "Market", "Algeria", "Globa
 
 const CAT_META: Record<Exclude<Category,"All">, { icon: LucideIcon; color: string; badge: string }> = {
   Operations: { icon: Factory,   color: "text-sky-400",     badge: "border-sky-500/30 text-sky-400 bg-sky-500/5" },
-  Market:     { icon: TrendingUp,color: "text-emerald-400", badge: "border-emerald-500/30 text-emerald-400 bg-emerald-500/5" },
+  Market:     { icon: TrendingUp,color: "text-emerald-700 dark:text-emerald-400", badge: "border-emerald-500/30 text-emerald-700 dark:text-emerald-400 bg-emerald-500/5" },
   Algeria:    { icon: MapPin,    color: "text-orange-400",  badge: "border-orange-500/30 text-orange-400 bg-orange-500/5" },
   Global:     { icon: Globe,     color: "text-violet-400",  badge: "border-violet-500/30 text-violet-400 bg-violet-500/5" },
 };
@@ -221,6 +221,7 @@ export default function News() {
   const [searchQ, setSearchQ] = useState("");
 
   useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const id = setInterval(() => setSlideIndex(p => (p + 1) % newsSlides.length), 5500);
     return () => clearInterval(id);
   }, []);
@@ -243,11 +244,7 @@ export default function News() {
       {/* ── HERO ──────────────────────────────────────────────────────────── */}
       <section className="relative overflow-hidden border-b border-border min-h-[420px] flex items-center bg-zinc-950 isolation-isolate w-full">
         <div className="absolute inset-0 z-0 pointer-events-none">
-          {newsSlides.map((slide, idx) => (
-            <img key={idx} src={slide.image} alt={slide.tag}
-              className={`absolute inset-0 w-full h-full object-cover object-center transition-opacity duration-1000 ease-in-out
-                ${idx === slideIndex ? "opacity-75 scale-100" : "opacity-0 scale-105"}`} />
-          ))}
+          <img key={slideIndex} src={newsSlides[slideIndex].src} srcSet={newsSlides[slideIndex].srcSet} sizes="100vw" alt={newsSlides[slideIndex].tag} decoding="async" className="absolute inset-0 h-full w-full object-cover object-center opacity-75" />
         </div>
         <div className="absolute inset-0 bg-gradient-to-r from-zinc-950/85 via-zinc-950/20 to-transparent z-10 pointer-events-none" />
         <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/70 via-transparent to-transparent z-10 pointer-events-none" />
@@ -255,8 +252,8 @@ export default function News() {
 
         <div className="relative px-4 md:px-10 py-16 max-w-7xl mx-auto z-20 w-full">
           <div className="max-w-3xl space-y-4">
-            <div className="text-[10px] uppercase tracking-[0.25em] text-orange-500 font-mono font-bold">
-              / {lang === "en" ? "REAL-TIME MARKET INTELLIGENCE" : "INTELLIGENCE MARCHÉ EN TEMPS RÉEL"}
+            <div className="text-[10px] uppercase tracking-[0.25em] text-orange-300 font-mono font-bold">
+              / {lang === "en" ? "LNG MARKET INTELLIGENCE" : "INTELLIGENCE DU MARCHÉ GNL"}
             </div>
             <h1 className="text-4xl md:text-6xl font-display font-extrabold text-white tracking-tight leading-none drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]">
               LNG Market Hub
@@ -264,8 +261,8 @@ export default function News() {
             </h1>
             <p className="text-sm md:text-base text-zinc-300 max-w-xl leading-relaxed drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]">
               {lang === "en"
-                ? `${NEWS.length} industry dispatches · live market benchmarks · Sonatrach & global LNG`
-                : `${NEWS.length} dépêches · indices de marché en direct · Sonatrach & GNL mondial`}
+                ? `${NEWS.length} industry dispatches · reference market snapshots · Sonatrach & global LNG`
+                : `${NEWS.length} dépêches · indices de marché de référence · Sonatrach & GNL mondial`}
             </p>
             <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-3 max-w-3xl">
               <MarketStat icon={TrendingUp} label="TTF (EU)"   value="€31.44" trend="+2.4%" />
@@ -300,7 +297,7 @@ export default function News() {
                 className={[
                   "px-3 py-1 rounded-full text-[11px] font-mono font-bold uppercase tracking-wide transition-all border",
                   activeCategory === cat
-                    ? "bg-orange-500 border-orange-500 text-white"
+                    ? "bg-orange-500 border-orange-500 text-foreground"
                     : "border-border text-muted-foreground hover:border-orange-500/40 hover:text-foreground",
                 ].join(" ")}
               >
@@ -328,7 +325,7 @@ export default function News() {
             <div className="flex flex-col md:flex-row">
               <div className="md:flex-1 p-6 md:p-8 space-y-4">
                 <div className="flex items-center gap-2">
-                  <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-orange-500 text-[10px] font-mono font-bold text-white uppercase tracking-widest">
+                  <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-orange-500 text-[10px] font-mono font-bold text-foreground uppercase tracking-widest">
                     <Flame className="h-3 w-3" /> Featured
                   </span>
                   <CategoryBadge category={featured.category} />
@@ -411,9 +408,9 @@ function MarketStat({ icon: Icon, label, value, trend }: { icon: LucideIcon; lab
         <Icon className="h-3 w-3 text-orange-500" />{label}
       </div>
       <div className="flex items-baseline justify-between">
-        <span className="text-xl font-display font-extrabold text-white">{value}</span>
+        <span className="text-xl font-display font-extrabold text-foreground">{value}</span>
         {trend && (
-          <span className={`text-[10px] font-mono ${trend.startsWith("+") ? "text-emerald-400" : "text-rose-400"}`}>{trend}</span>
+          <span className={`text-[10px] font-mono ${trend.startsWith("+") ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400"}`}>{trend}</span>
         )}
       </div>
     </div>

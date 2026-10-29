@@ -9,9 +9,8 @@
 // "Remaining Useful Life" — it produces an auditable Risk Tier + recommended
 // test/inspection program that a QA/QC engineer can verify line-by-line.
 //
-// Mirrored (duplicated, not imported) in functions/api/ai-agent.ts so the
-// Cloudflare Pages Function stays fully self-contained with zero build-time
-// cross-directory import risk — keep both copies in sync when editing rules.
+// The Cloudflare assistant no longer duplicates these rules. It receives only
+// bounded static context and must defer to approved procedures.
 
 import type { Equipment } from "@/data";
 
@@ -233,16 +232,16 @@ export function buildEngineeringJudgment(eq: Equipment): EngineeringJudgment {
   if (typeCode === "P") {
     recommendedTests.push(
       { en: "API 610 Mechanical Run Test — vibration, bearing temperature, and NPSH margin verification.", fr: "Essai mécanique API 610 — vibrations, température des paliers, marge NPSH." },
-      { en: "Mechanical seal leak test and coupling alignment check (laser alignment tolerance ±0.05 mm).", fr: "Test d'étanchéité du joint mécanique et alignement d'accouplement (tolérance laser ±0.05 mm)." }
+      { en: "Mechanical seal leak test and coupling alignment check against the OEM-approved alignment tolerance.", fr: "Test d'étanchéité du joint mécanique et alignement d'accouplement selon la tolérance approuvée par le constructeur." }
     );
   } else if (pressure.isShellTube) {
     recommendedTests.push(
-      { en: `Hydrostatic Pressure Test per ASME VIII UG-99 — Shell side to ${pressure.shellTestBar ?? "N/A"} bar, Tube side to ${pressure.tubeTestBar ?? "N/A"} bar.`, fr: `Épreuve hydrostatique selon ASME VIII UG-99 — Calandre à ${pressure.shellTestBar ?? "N/A"} bar, Faisceau à ${pressure.tubeTestBar ?? "N/A"} bar.` },
+      { en: `Verify the approved hydrostatic test procedure. Recorded test pressures: shell ${pressure.shellTestBar ?? "N/A"} bar, tube ${pressure.tubeTestBar ?? "N/A"} bar. These are record values, not calculated test setpoints.`, fr: `Vérifier la procédure d'épreuve hydrostatique approuvée. Pressions d'épreuve enregistrées : calandre ${pressure.shellTestBar ?? "N/A"} bar, faisceau ${pressure.tubeTestBar ?? "N/A"} bar. Ce sont des valeurs de dossier, pas des consignes calculées.` },
       { en: "Eddy Current Testing (ECT) on tube bundle — detects wall thinning/pitting without bundle removal.", fr: "Contrôle par Courants de Foucault (ECT) sur le faisceau — détecte l'amincissement/piqûration sans démontage." }
     );
   } else if (!pressure.dataMissing) {
     recommendedTests.push(
-      { en: `Hydrostatic Pressure Test per ASME VIII UG-99 at ${pressure.testBar} bar (${pressure.ratio ? pressure.ratio.toFixed(2) : "N/A"}× design pressure of ${pressure.designBar} bar).`, fr: `Épreuve hydrostatique selon ASME VIII UG-99 à ${pressure.testBar} bar (${pressure.ratio ? pressure.ratio.toFixed(2) : "N/A"}× la pression de calcul de ${pressure.designBar} bar).` }
+      { en: `Verify the approved hydrostatic test procedure. Recorded test pressure ${pressure.testBar ?? "N/A"} bar and design pressure ${pressure.designBar ?? "N/A"} bar are reference values, not a calculated test setpoint.`, fr: `Vérifier la procédure d'épreuve hydrostatique approuvée. Pression d'épreuve enregistrée ${pressure.testBar ?? "N/A"} bar et pression de calcul ${pressure.designBar ?? "N/A"} bar : valeurs de référence, pas une consigne calculée.` }
     );
   } else {
     recommendedTests.push(
@@ -254,11 +253,11 @@ export function buildEngineeringJudgment(eq: Equipment): EngineeringJudgment {
   // ── Service-specific NDT / metallurgy judgment ────────────────────────────
   if (unit === "X06" || service.fluidEn.includes("MCHE")) {
     recommendedTests.push(
-      { en: "Helium Leak Testing (Mass Spectrometry) — validates cryogenic tube-to-tubesheet joint integrity below 10⁻⁸ mbar·L/s.", fr: "Test de fuite à l'hélium (spectrométrie de masse) — valide l'intégrité des joints tube/plaque tubulaire sous 10⁻⁸ mbar·L/s." },
+      { en: "Helium leak testing may be applicable; confirm the method and acceptance criteria from the approved cryogenic test procedure.", fr: "Un test de fuite à l'hélium peut être applicable ; confirmer la méthode et les critères d'acceptation dans la procédure cryogénique approuvée." },
       { en: "Phased Array Ultrasonic Testing (PAUT) on aluminum shell welds and nozzle attachments.", fr: "Ultrasons multi-éléments (PAUT) sur les soudures de calandre aluminium et tubulures." }
     );
     riskFactors.push({ en: "Cryogenic aluminum construction is highly sensitive to Liquid Metal Embrittlement from trace mercury.", fr: "La construction aluminium cryogénique est très sensible à la fragilisation par métaux liquides (mercure)." });
-    safetyRecommendations.push({ en: "Confirm upstream X02 mercury guard-bed performance (<0.01 µg/Nm³) before every extended run.", fr: "Confirmer la performance du lit de garde mercure X02 en amont (<0.01 µg/Nm³) avant chaque marche prolongée." });
+    safetyRecommendations.push({ en: "Confirm upstream mercury-removal performance against the approved design basis before extended operation.", fr: "Confirmer la performance amont de démercurisation selon la base de conception approuvée avant marche prolongée." });
   }
   if (unit === "X01") {
     recommendedTests.push(
@@ -310,17 +309,17 @@ export function buildEngineeringJudgment(eq: Equipment): EngineeringJudgment {
     safetyRecommendations.push({ en: "Confirm the derogation expiry date and prioritize the outstanding NDT/hydrotest before it lapses.", fr: "Vérifier la date d'échéance de la dérogation et prioriser le CND/épreuve en attente avant expiration." });
   }
   if (pressure.belowCodeMinMargin) {
-    riskFactors.push({ en: `Test/design pressure ratio (${pressure.ratio?.toFixed(2)}×) is below the typical 1.3×–1.5× code margin — re-verify MAWP basis.`, fr: `Le ratio pression d'épreuve/calcul (${pressure.ratio?.toFixed(2)}×) est sous la marge de code typique 1.3×–1.5× — revérifier la base MAWP.` });
+    riskFactors.push({ en: `Recorded test/design pressure ratio (${pressure.ratio?.toFixed(2)}×) is outside the configured screening band — verify the approved MAWP/test basis; this is not a code-compliance conclusion.`, fr: `Le ratio pression d'épreuve/calcul (${pressure.ratio?.toFixed(2)}×) sort de la plage de contrôle configurée — vérifier la base MAWP/essai approuvée ; ceci n'est pas une conclusion de conformité au code.` });
   }
 
   if (riskFactors.length === 0) {
     riskFactors.push({ en: "No elevated risk factors identified from the current master record.", fr: "Aucun facteur de risque élevé identifié dans la fiche actuelle." });
   }
   if (safetyRecommendations.length === 0) {
-    safetyRecommendations.push({ en: "Maintain the standard preventive inspection interval; no immediate safety action required.", fr: "Maintenir l'intervalle d'inspection préventive standard ; aucune action de sécurité immédiate requise." });
+    safetyRecommendations.push({ en: "No additional action is inferred from this incomplete record. Follow the approved inspection plan and site procedures; this is not a fitness-for-service or safety clearance.", fr: "Aucune action supplémentaire n'est déduite de ce dossier incomplet. Suivre le plan d'inspection approuvé et les procédures du site ; ceci n'est pas une aptitude au service ni une autorisation de sécurité." });
   }
   if (processRecommendations.length === 0) {
-    processRecommendations.push({ en: "No specific process deviation identified; continue standard operating envelope monitoring.", fr: "Aucune déviation de procédé spécifique identifiée ; poursuivre la surveillance standard." });
+    processRecommendations.push({ en: "No specific process deviation is inferred from the supplied record; continue monitoring against the approved operating envelope.", fr: "Aucune déviation de procédé spécifique n'est déduite du dossier fourni ; poursuivre la surveillance selon l'enveloppe de fonctionnement approuvée." });
   }
 
   return {
