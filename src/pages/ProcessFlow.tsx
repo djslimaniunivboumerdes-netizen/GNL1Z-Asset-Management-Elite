@@ -1,14 +1,17 @@
 // src/pages/ProcessFlow.tsx
 import React, { useState, useEffect } from 'react';
 import { Play, Pause, AlertTriangle, Gauge, ThermometerSun, ArrowRightCircle } from 'lucide-react';
-import processNodes, { ProcessNode } from '../data/process_nodes';
 import { DCS_PANELS } from '../data/dcs_panels';
-import gnl1zDatabase from '../data/gnl1z_database.json';
+import processNodes, { type ProcessNode } from '../data/process_nodes';
+import { getEquipmentByTag } from '@/data';
+import { EQUIPMENT } from '@/data';
+import type { DCSPanel } from '../data/dcs_panels';
+const sections = EQUIPMENT.reduce<Record<string, typeof EQUIPMENT>>((groups, eq) => { (groups[eq.section] ??= []).push(eq); return groups; }, {});
 
 const ProcessFlow = () => {
   const [isAnimating, setIsAnimating] = useState(true);
-  const [selectedNode, setSelectedNode] = useState<ProcessNode | null>(null);
-  const [selectedPanel, setSelectedPanel] = useState<any>(null);
+  const [selectedNode, setSelectedNode] = useState<(typeof EQUIPMENT)[number] | ProcessNode | null>(null);
+  const [selectedPanel, setSelectedPanel] = useState<DCSPanel | null>(null);
   const [liveKPIs, setLiveKPIs] = useState({
     co2Removal: 99.85,
     lngProduction: 1280,
@@ -17,7 +20,7 @@ const ProcessFlow = () => {
     overallEfficiency: 96.8,
   });
 
-  // Simulate live data updates
+  // Illustrative animation only — not live plant telemetry
   useEffect(() => {
     const interval = setInterval(() => {
       setLiveKPIs(prev => ({
@@ -40,7 +43,7 @@ const ProcessFlow = () => {
             <span className="text-black font-bold">GL1Z</span>
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-cyan-400">GL1Z LNG DIGITAL TWIN</h1>
+            <h1 className="text-2xl font-bold text-cyan-400">GL1Z PROCESS OVERVIEW</h1>
             <p className="text-sm text-gray-400">Sonatrach Arzew - Process Flow Dashboard</p>
           </div>
         </div>
@@ -78,20 +81,20 @@ const ProcessFlow = () => {
             <ArrowRightCircle size={18} /> EQUIPMENT HIERARCHY
           </h3>
           
-          {Object.entries(gnl1zDatabase.sections || {}).map(([section, equipment]) => (
+          {Object.entries(sections).map(([section, equipment]) => (
             <div key={section} className="mb-6">
               <div className="text-amber-400 font-medium mb-2 uppercase text-sm tracking-widest">
                 {section}
               </div>
               <ul className="space-y-1 text-sm">
-                {(equipment as any[]).slice(0, 7).map((eq: any) => (
+                {equipment.slice(0, 7).map((eq) => (
                   <li
                     key={eq.tag}
                     className="cursor-pointer hover:bg-gray-800 px-3 py-1.5 rounded-lg transition-colors flex justify-between"
-                    onClick={() => setSelectedNode(eq)}
+                    onClick={() => setSelectedNode(processNodes.find(node => node.tag === eq.tag) ?? eq)}
                   >
                     <span>{eq.tag}</span>
-                    <span className="text-gray-500 text-xs">{eq.description?.substring(0, 22)}...</span>
+                    <span className="text-gray-500 text-xs">{eq.name.substring(0, 22)}...</span>
                   </li>
                 ))}
               </ul>
@@ -159,15 +162,15 @@ const ProcessFlow = () => {
           {selectedNode ? (
             <div className="p-6">
               <h2 className="text-2xl font-bold text-cyan-400 mb-1">{selectedNode.tag}</h2>
-              <p className="text-gray-400 mb-6">{selectedNode.description}</p>
+              <p className="text-gray-400 mb-6">{getEquipmentByTag(selectedNode.tag)?.name ?? 'Process reference node'}</p>
 
               <div className="bg-gray-800 rounded-xl p-5 mb-6">
                 <div className="flex justify-between items-center mb-4">
-                  <span className="text-sm text-gray-400">CURRENT STATUS</span>
+                  <span className="text-sm text-gray-400">ILLUSTRATIVE STATUS</span>
                   <span className={`px-4 py-1 rounded-full text-sm font-medium ${
-                    selectedNode.status === 'running' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-yellow-500/20 text-yellow-400'
+                    getEquipmentByTag(selectedNode.tag)?.testing_status === 'OK' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-yellow-500/20 text-yellow-400'
                   }`}>
-                    {selectedNode.status.toUpperCase()}
+                    {getEquipmentByTag(selectedNode.tag)?.testing_status ?? 'REFERENCE'}
                   </span>
                 </div>
 
@@ -194,16 +197,16 @@ const ProcessFlow = () => {
             <div className="p-6">
               <h3 className="text-lg font-semibold mb-4">DCS PANELS</h3>
               <div className="space-y-4">
-                {dcsPanels.map((panel) => (
+                {DCS_PANELS.map((panel) => (
                   <div
                     key={panel.id}
                     className="bg-gray-800 hover:bg-gray-700 p-4 rounded-xl cursor-pointer transition-all"
                     onClick={() => setSelectedPanel(panel)}
                   >
-                    <div className="font-medium">{panel.title}</div>
+                    <div className="font-medium">{panel.title_en}</div>
                     <div className="text-xs text-gray-400 mt-1">{panel.section}</div>
                     <div className="text-emerald-400 text-sm mt-2 font-mono">
-                      {Object.values(panel.kpis)[0]}
+                      {String(Object.values(panel.kpis)[0] ?? "Reference panel")}
                     </div>
                   </div>
                 ))}

@@ -1,222 +1,85 @@
-import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import Fuse from "fuse.js";
-import { Search, Download, ArrowRight, Filter, Box } from "lucide-react";
+import { useDeferredValue, useMemo } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { Search, Download, ArrowRight, Filter, Box, X, ChevronLeft, ChevronRight, Database } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
-import { EQUIPMENT, UNITS, STATUSES, type Equipment } from "@/data";
+import { EQUIPMENT, UNITS, STATUSES } from "@/data";
 import { exportToCsv } from "@/lib/industrial";
+import { createEquipmentSearch, matchingParts } from "@/lib/equipmentSearch";
 import { useI18n } from "@/contexts/I18nContext";
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 20;
+const searchEquipment = createEquipmentSearch(EQUIPMENT);
+
+function StatusChip({ status }: { status: string }) {
+  const color = status === "DEROGATION" ? "border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-300"
+    : status === "PREVENTIVE" ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+    : "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+  return <span className={`inline-flex whitespace-nowrap rounded-md border px-2 py-1 text-[10px] font-medium ${color}`}>{status}</span>;
+}
 
 export default function EquipmentList() {
   const { t, lang } = useI18n();
-  const [query, setQuery] = useState("");
-  const [unit, setUnit] = useState<string>("all");
-  const [status, setStatus] = useState<string>("all");
-  const [page, setPage] = useState(0);
-
-  // Expanded Fuse setup to look deep inside spare parts, materials, and specs
-  const fuse = useMemo(
-    () => new Fuse(EQUIPMENT, {
-      threshold: 0.35,
-      keys: [
-        "tag", 
-        "name", 
-        "name_en", 
-        "name_fr", 
-        "unit", 
-        "section", 
-        "area", 
-        "type.name", 
-        "notes",
-        "technical.serial_no", 
-        "technical.pressure_bar", 
-        "technical.weight_kg", 
-        "technical.volume_m3",
-        "spare_parts.items.code", 
-        "spare_parts.items.description", 
-        "spare_parts.items.reference", 
-        "spare_parts.items.category", 
-        "spare_parts.items.material", 
-        "spare_parts.items.size_nominal", 
-        "spare_parts.items.stock_location"
-      ],
-    }),
-    []
-  );
+  const L = (en: string, fr: string) => lang === "fr" ? fr : en;
+  const [params, setParams] = useSearchParams();
+  const query = params.get("q") ?? "";
+  const deferredQuery = useDeferredValue(query);
+  const unit = UNITS.includes(params.get("unit") ?? "") ? params.get("unit")! : "all";
+  const status = STATUSES.includes(params.get("status") ?? "") ? params.get("status")! : "all";
+  const sort = params.get("sort") ?? "register";
+  const setFilter = (key: string, value: string) => setParams((previous) => {
+    const next = new URLSearchParams(previous);
+    if (!value || value === "all") next.delete(key); else next.set(key, value);
+    if (key !== "page") next.delete("page");
+    return next;
+  }, { replace: true });
 
   const filtered = useMemo(() => {
-    let list: Equipment[] = EQUIPMENT;
-    if (query.trim()) {
-      const q = query.toLowerCase().trim();
-      // Combine Fuse search results with deep JSON string matching for perfect recall
-      const fuseResults = fuse.search(q).map((r) => r.item);
-      const deepResults = EQUIPMENT.filter(e => JSON.stringify(e).toLowerCase().includes(q));
-      list = [...new Set([...fuseResults, ...deepResults])];
-    }
-    if (unit !== "all") list = list.filter((e) => e.unit === unit);
-    if (status !== "all") list = list.filter((e) => e.testing_status === status);
-    return list;
-  }, [query, unit, status, fuse]);
-
-  const pageItems = filtered.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+    const result = searchEquipment(deferredQuery).filter((item) => (unit === "all" || item.unit === unit) && (status === "all" || item.testing_status === status));
+    return sort === "register" ? result : [...result].sort((a, b) => sort === "parts" ? b.spare_parts.count - a.spare_parts.count : a.tag.localeCompare(b.tag));
+  }, [deferredQuery, unit, status, sort]);
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-
-  const handleExport = () => {
-    exportToCsv("gnl1z_equipment.csv", filtered.map((e) => ({
-      tag: e.tag, name: e.name, type: e.type.name, unit: e.unit, section: e.section,
-      status: e.testing_status, weight_kg: e.technical.weight_kg, pressure_bar: e.technical.pressure_bar,
-      volume_m3: e.technical.volume_m3, serial_no: e.technical.serial_no,
-      parts_count: e.spare_parts.count, notes: e.notes ?? "",
-    })));
-  };
+  const page = Math.min(pageCount - 1, Math.max(0, Math.floor(Number(params.get("page")) || 1) - 1));
+  const pageItems = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const hasFilters = Boolean(query || unit !== "all" || status !== "all");
+  const linkOf = (tag: string) => `/equipment/${encodeURIComponent(tag)}`;
+  const handleExport = () => exportToCsv("gnl1z_equipment.csv", filtered.map((item) => ({
+    tag: item.tag, name: item.name, type: item.type.name, unit: item.unit, section: item.section,
+    status: item.testing_status, weight_kg: item.technical.weight_kg, pressure_bar: item.technical.pressure_bar,
+    volume_m3: item.technical.volume_m3, serial_no: item.technical.serial_no, parts_count: item.spare_parts.count, notes: item.notes ?? "",
+  })));
 
   return (
-    <div className="px-4 md:px-8 py-6 md:py-8 max-w-7xl mx-auto space-y-6">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 bg-slate-900/40 border border-slate-800 rounded-2xl p-6 backdrop-blur-sm">
-        <div>
-          <div className="text-[10px] uppercase tracking-widest text-cyan-400 font-mono mb-1">/ {t("equipment")}</div>
-          <h1 className="text-3xl md:text-4xl font-display font-bold text-white tracking-tight">{t("equipment")}</h1>
-          <p className="text-sm text-slate-400 mt-1 font-light">
-            {filtered.length} / {EQUIPMENT.length} {lang === "en" ? "equipment items" : "équipements"}
-          </p>
+    <div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 md:py-8 lg:px-8">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div><div className="mb-2 flex items-center gap-2 text-xs font-medium text-cyan-700 dark:text-cyan-400"><Database className="h-4 w-4" />{L("TECHNICAL REGISTER", "RÉFÉRENTIEL TECHNIQUE")}</div><h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{t("equipment")}</h1><p className="mt-2 text-sm text-muted-foreground">{L("Equipment specifications, components and maintenance records.", "Spécifications, composants et dossiers de maintenance des équipements.")}</p></div>
+        <Button variant="outline" onClick={handleExport} disabled={!filtered.length} className="rounded-lg"><Download className="h-4 w-4" />{t("exportCsv")}</Button>
+      </div>
+      <section aria-label={L("Equipment filters", "Filtres des équipements")} className="space-y-4 rounded-xl border border-border bg-card p-4 sm:p-5">
+        <div className="relative"><Search className="absolute left-3.5 top-3.5 h-4 w-4 text-muted-foreground" /><Input type="search" placeholder={L("Search tag, equipment, serial number or spare part…", "Rechercher un tag, équipement, série ou pièce…")} aria-label={t("searchEquipment")} value={query} onChange={(event) => setFilter("q", event.target.value)} className="h-11 rounded-lg bg-background pl-10 pr-10 text-sm" />{query && <Button variant="ghost" size="icon" aria-label={L("Clear search", "Effacer la recherche")} onClick={() => setFilter("q", "")} className="absolute right-1 top-1 h-9 w-9"><X className="h-4 w-4" /></Button>}</div>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-[1fr_1fr_1fr_auto]">
+          <div className="relative"><Filter className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" /><select aria-label={t("unit")} value={unit} onChange={(event) => setFilter("unit", event.target.value)} className="h-11 w-full rounded-lg border border-input bg-background pl-9 pr-3 text-sm"><option value="all">{t("filterAll")}</option>{UNITS.map((value) => <option key={value}>{value}</option>)}</select></div>
+          <select aria-label={t("status")} value={status} onChange={(event) => setFilter("status", event.target.value)} className="h-11 min-w-0 rounded-lg border border-input bg-background px-3 text-sm"><option value="all">{t("filterStatus")}</option>{STATUSES.map((value) => <option key={value}>{value}</option>)}</select>
+          <select aria-label={L("Sort equipment", "Trier les équipements")} value={sort} onChange={(event) => setFilter("sort", event.target.value)} className="h-11 min-w-0 rounded-lg border border-input bg-background px-3 text-sm"><option value="register">{L("Register order", "Ordre du registre")}</option><option value="tag">{L("Tag A–Z", "Tag A–Z")}</option><option value="parts">{L("Most parts", "Plus de pièces")}</option></select>
+          <Button variant="ghost" disabled={!hasFilters} onClick={() => setParams({})} className="col-span-2 h-11 text-muted-foreground lg:col-span-1"><X className="h-4 w-4" />{L("Reset filters", "Réinitialiser")}</Button>
         </div>
-        <Button onClick={handleExport} className="bg-cyan-600 hover:bg-cyan-500 text-white gap-2 self-start rounded-xl py-5 shadow-lg shadow-cyan-600/20 font-mono text-xs">
-          <Download className="h-4 w-4" /> {t("exportCsv")}
-        </Button>
-      </div>
-
-      {/* Filters */}
-      <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-4 bg-slate-900/20 border border-slate-800 rounded-2xl p-4 backdrop-blur-sm">
-        <div className="relative">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <Input
-            placeholder={t("searchEquipment")}
-            value={query}
-            onChange={(e) => { setQuery(e.target.value); setPage(0); }}
-            className="pl-10 h-11 bg-slate-950 border-slate-800 text-white rounded-xl font-mono text-xs placeholder:text-slate-500 focus:border-cyan-500 focus:outline-none"
-          />
-        </div>
-        <Select value={unit} onValueChange={(v) => { setUnit(v); setPage(0); }}>
-          <SelectTrigger className="h-11 md:w-44 bg-slate-950 border-slate-800 text-white rounded-xl font-mono text-xs"><Filter className="h-4 w-4 mr-1.5 text-cyan-500" /><SelectValue /></SelectTrigger>
-          <SelectContent className="bg-slate-900 border-slate-800 text-white rounded-xl font-mono text-xs">
-            <SelectItem value="all">{t("filterAll")}</SelectItem>
-            {UNITS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={status} onValueChange={(v) => { setStatus(v); setPage(0); }}>
-          <SelectTrigger className="h-11 md:w-48 bg-slate-950 border-slate-800 text-white rounded-xl font-mono text-xs"><SelectValue /></SelectTrigger>
-          <SelectContent className="bg-slate-900 border-slate-800 text-white rounded-xl font-mono text-xs">
-            <SelectItem value="all">{t("filterStatus")}</SelectItem>
-            {STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Table - desktop */}
-      <div className="hidden md:block border border-slate-800 rounded-2xl overflow-hidden bg-slate-900/50 shadow-2xl backdrop-blur-sm">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-950/60 text-xs uppercase tracking-wider text-slate-400 font-mono border-b border-slate-800">
-            <tr>
-              <th className="text-left px-6 py-4 font-bold">{t("tag")}</th>
-              <th className="text-left px-6 py-4 font-bold">{t("name")}</th>
-              <th className="text-left px-6 py-4 font-bold">{t("type")}</th>
-              <th className="text-left px-6 py-4 font-bold">{t("unit")}</th>
-              <th className="text-left px-6 py-4 font-bold">{t("section")}</th>
-              <th className="text-left px-6 py-4 font-bold">{t("status")}</th>
-              <th className="text-right px-6 py-4 font-bold">{t("parts")}</th>
-              <th className="px-4"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-800 bg-slate-950/20">
-            {pageItems.map((e) => {
-              // Highlight if query matched deep inside a spare part
-              const matchedPart = query.trim() && e.spare_parts?.items?.some(p => JSON.stringify(p).toLowerCase().includes(query.toLowerCase().trim()));
-
-              return (
-                <tr key={e.tag} className="hover:bg-slate-800/40 transition-colors">
-                  <td className="px-6 py-4 font-mono text-xs font-bold text-cyan-400">{e.tag}</td>
-                  <td className="px-6 py-4 max-w-[320px]">
-                    <div className="text-white font-medium truncate">{e.name}</div>
-                    {matchedPart && (
-                      <span className="inline-flex items-center gap-1 mt-1 bg-amber-500/10 border border-amber-500/30 text-amber-400 px-2 py-0.5 rounded-full text-[10px] font-mono animate-pulse">
-                        <Box className="h-3 w-3" /> {lang === "en" ? "Matching Component" : "Pièce Correspondante"}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 text-slate-400 font-light">{e.type.name}</td>
-                  <td className="px-6 py-4 font-mono text-xs text-slate-300">{e.unit}</td>
-                  <td className="px-6 py-4 text-slate-400 text-xs font-mono">{e.section}</td>
-                  <td className="px-6 py-4"><StatusChip status={e.testing_status} /></td>
-                  <td className="px-6 py-4 text-right font-mono font-bold text-slate-300">{e.spare_parts.count}</td>
-                  <td className="px-4 py-4">
-                    <Button asChild variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-cyan-400 hover:bg-slate-800 rounded-xl">
-                      <Link to={`/equipment/${encodeURIComponent(e.tag)}`}><ArrowRight className="h-4 w-4" /></Link>
-                    </Button>
-                  </td>
-                </tr>
-              );
-            })}
-            {pageItems.length === 0 && (
-              <tr><td colSpan={8} className="px-6 py-16 text-center text-slate-400 font-mono text-sm">{lang === "en" ? "No equipment found matching your filters." : "Aucun équipement trouvé pour ces filtres."}</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Cards - mobile */}
-      <div className="md:hidden space-y-4">
-        {pageItems.map((e) => {
-          const matchedPart = query.trim() && e.spare_parts?.items?.some(p => JSON.stringify(p).toLowerCase().includes(query.toLowerCase().trim()));
-
-          return (
-            <Link key={e.tag} to={`/equipment/${encodeURIComponent(e.tag)}`}
-              className="block border border-slate-800 rounded-2xl bg-slate-900/50 p-5 backdrop-blur-sm shadow-xl active:scale-[0.99] transition-transform">
-              <div className="flex items-start justify-between gap-2">
-                <div className="font-mono text-sm font-bold text-cyan-400">{e.tag}</div>
-                <StatusChip status={e.testing_status} />
-              </div>
-              <div className="text-sm font-bold text-white mt-2 line-clamp-2">{e.name}</div>
-              {matchedPart && (
-                <span className="inline-flex items-center gap-1 mt-2 bg-amber-500/10 border border-amber-500/30 text-amber-400 px-2.5 py-0.5 rounded-full text-[10px] font-mono">
-                  <Box className="h-3 w-3" /> {lang === "en" ? "Matching Component" : "Pièce Correspondante"}
-                </span>
-              )}
-              <div className="flex items-center gap-3 text-xs text-slate-400 mt-3 font-mono">
-                <span>{e.unit}</span>
-                <span>·</span>
-                <span>{e.section}</span>
-                <span className="ml-auto font-bold text-slate-200">{e.spare_parts.count} {lang === "en" ? "parts" : "pièces"}</span>
-              </div>
-            </Link>
-          );
-        })}
-        {pageItems.length === 0 && <div className="text-center text-slate-400 py-12 font-mono text-sm">{lang === "en" ? "No equipment found matching your filters." : "Aucun équipement trouvé pour ces filtres."}</div>}
-      </div>
-
-      {/* Pagination */}
-      {pageCount > 1 && (
-        <div className="flex items-center justify-between pt-4 text-sm font-mono text-slate-400">
-          <span>Page {page + 1} / {pageCount}</span>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)} className="bg-slate-900 border-slate-800 text-slate-300 hover:text-white rounded-xl px-4">{lang === "en" ? "Prev" : "Précédent"}</Button>
-            <Button variant="outline" size="sm" disabled={page >= pageCount - 1} onClick={() => setPage((p) => p + 1)} className="bg-slate-900 border-slate-800 text-slate-300 hover:text-white rounded-xl px-4">{lang === "en" ? "Next" : "Suivant"}</Button>
-          </div>
-        </div>
-      )}
+      </section>
+      <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground"><span role="status" aria-live="polite">{filtered.length} {L("of", "sur")} {EQUIPMENT.length} {L("equipment items", "équipements")}</span><span className="hidden sm:inline">{L("Select an asset to open its technical file", "Sélectionnez un actif pour ouvrir son dossier")}</span></div>
+      {filtered.length ? <>
+        <section className="hidden overflow-hidden rounded-xl border border-border bg-card md:block">
+          <table className="w-full text-sm"><thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground"><tr>{[t("tag"), t("name"), t("unit"), t("status"), t("parts"), ""].map((label, index) => <th key={index} scope="col" className={`px-4 py-3.5 font-medium ${index === 4 ? "text-right" : "text-left"}`}>{label}</th>)}</tr></thead>
+            <tbody className="divide-y divide-border">{pageItems.map((item) => {
+              const parts = matchingParts(item, deferredQuery);
+              return <tr key={item.tag} className="transition-colors hover:bg-muted/40"><td className="whitespace-nowrap px-4 py-4 font-mono text-xs font-semibold"><Link to={linkOf(item.tag)} className="text-cyan-700 hover:underline dark:text-cyan-400">{item.tag}</Link></td><td className="max-w-[340px] px-4 py-4"><Link to={linkOf(item.tag)} className="block font-medium hover:underline">{item.name}</Link><span className="mt-1 block text-xs text-muted-foreground">{item.type.name} · {item.section}</span>{parts.length > 0 && <span className="mt-2 inline-flex items-center gap-1 rounded bg-amber-500/10 px-2 py-1 text-[10px] text-amber-700 dark:text-amber-300"><Box className="h-3 w-3" />{parts.length} {L("matching parts", "pièces correspondantes")}</span>}</td><td className="px-4 py-4 font-mono text-xs text-muted-foreground">{item.unit}</td><td className="px-4 py-4"><StatusChip status={item.testing_status} /></td><td className="px-4 py-4 text-right font-mono text-xs tabular-nums">{item.spare_parts.count}</td><td className="px-3"><Button asChild variant="ghost" size="icon" aria-label={`${L("Open", "Ouvrir")} ${item.tag}`}><Link to={linkOf(item.tag)}><ArrowRight className="h-4 w-4" /></Link></Button></td></tr>;
+            })}</tbody>
+          </table>
+        </section>
+        <section className="space-y-3 md:hidden" aria-label={L("Equipment results", "Résultats des équipements")}>{pageItems.map((item) => {
+          const parts = matchingParts(item, deferredQuery);
+          return <Link key={item.tag} to={linkOf(item.tag)} className="block rounded-xl border border-border bg-card p-4 shadow-sm transition-colors hover:border-cyan-500/50"><div className="flex items-center justify-between gap-2"><span className="font-mono text-sm font-semibold text-cyan-700 dark:text-cyan-400">{item.tag}</span><StatusChip status={item.testing_status} /></div><h2 className="mt-3 text-sm font-semibold leading-relaxed">{item.name}</h2><p className="mt-1 text-xs text-muted-foreground">{item.type.name}</p>{parts.length > 0 && <p className="mt-2 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-300"><Box className="h-3 w-3" />{parts.length} {L("matching parts", "pièces correspondantes")}</p>}<div className="mt-4 flex items-center justify-between border-t border-border pt-3 text-xs text-muted-foreground"><span>{item.unit} · {item.section}</span><span className="flex items-center gap-2">{item.spare_parts.count} {t("parts")}<ArrowRight className="h-3.5 w-3.5" /></span></div></Link>;
+        })}</section>
+        <nav aria-label={L("Equipment pagination", "Pagination des équipements")} className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground"><span>{page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, filtered.length)} {L("of", "sur")} {filtered.length}</span><div className="flex items-center gap-3"><Button variant="outline" size="sm" disabled={page === 0} onClick={() => setFilter("page", String(page))}><ChevronLeft className="h-4 w-4" />{L("Previous", "Précédent")}</Button><span className="tabular-nums">{page + 1} / {pageCount}</span><Button variant="outline" size="sm" disabled={page >= pageCount - 1} onClick={() => setFilter("page", String(page + 2))}>{L("Next", "Suivant")}<ChevronRight className="h-4 w-4" /></Button></div></nav>
+      </> : <section className="rounded-xl border border-dashed border-border bg-card px-5 py-16 text-center"><Search className="mx-auto h-8 w-8 text-muted-foreground" /><h2 className="mt-4 font-semibold">{L("No matching equipment", "Aucun équipement trouvé")}</h2><p className="mt-2 text-sm text-muted-foreground">{L("Try a shorter tag or remove a filter.", "Essayez un tag plus court ou supprimez un filtre.")}</p><Button variant="outline" className="mt-5" onClick={() => setParams({})}>{L("Clear all filters", "Effacer tous les filtres")}</Button></section>}
     </div>
   );
-}
-
-function StatusChip({ status }: { status: string }) {
-  const variant = status === "DEROGATION" ? "bg-rose-500/10 text-rose-400 border-rose-500/30"
-    : status === "PREVENTIVE" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
-    : "bg-amber-500/10 text-amber-400 border-amber-500/30";
-  return <Badge variant="outline" className={`font-mono text-[10px] px-2.5 py-1 rounded-full ${variant}`}>{status}</Badge>;
 }

@@ -159,7 +159,7 @@ export function QrScannerButton({ onScan }: QrScannerButtonProps) {
               </div>
               {camError && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-center gap-2 bg-black/70 text-white/80 text-xs p-3">
-                  <AlertTriangle className="h-5 w-5 text-amber-400" />
+                  <AlertTriangle className="h-5 w-5 text-amber-700 dark:text-amber-400" />
                   <div className="font-mono">{camError}</div>
                   <div className="text-white/50">Type the tag manually below.</div>
                 </div>

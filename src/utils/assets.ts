@@ -1,37 +1,30 @@
-// ─── DASHBOARD FOLDER ASSETS ───
-import dash1 from "@/assets/dashboard/pictures-assets (1).jpg";
-import dash5 from "@/assets/dashboard/pictures-assets (5).jpg";
-import dash6 from "@/assets/dashboard/pictures-assets (6).jpg";
-import dash8 from "@/assets/dashboard/pictures-assets (8).jpg";
-import dash12 from "@/assets/dashboard/pictures-assets (12).png";
-import dash14 from "@/assets/dashboard/pictures-assets (14).png";
-import dash17 from "@/assets/dashboard/pictures-assets (17).png";
-import dash19 from "@/assets/dashboard/pictures-assets (19).webp";
-import dash21 from "@/assets/dashboard/pictures-assets (21).png";
+// Responsive WebP derivatives. Originals remain available in ../assets.
+// Regenerate after replacing photography with `npm run images:optimize`.
+const imageModules = import.meta.glob<string>(
+  "../assets/optimized/*.webp",
+  { eager: true, query: "?url", import: "default" },
+);
 
-// ─── ABOUT FOLDER ASSETS ───
-import about2 from "@/assets/about/pictures-assets (2).jpg";
-import about3 from "@/assets/about/pictures-assets (3).jpg";
-import about4 from "@/assets/about/pictures-assets (4).jpg";
-import about5 from "@/assets/about/pictures-assets (5).jpg";
-import about8 from "@/assets/about/pictures-assets (8).jpg";
-import about9 from "@/assets/about/pictures-assets (9).png";
-import about18 from "@/assets/about/pictures-assets (18).png";
-import about23 from "@/assets/about/pictures-assets (23).jpg";
+function imageSet(prefix: string) {
+  const small = imageModules[`../assets/optimized/${prefix}-640.webp`];
+  const large = imageModules[`../assets/optimized/${prefix}-1280.webp`];
+  return { src: large, srcSet: `${small} 640w, ${large} 1280w` };
+}
+
+const unit40 = imageSet("dashboard-5");
+const unit30 = imageSet("dashboard-1");
+const unit50 = imageSet("dashboard-6");
+const unit60 = imageSet("dashboard-8");
+const unit70 = imageSet("dashboard-12");
 
 export const GNL1Z_ASSETS = {
-  // Mapping the active unit views directly to your dashboard folder images
+  unitImages: { unit40, unit30, unit50, unit60, unit70 },
+  // Preserve the string API for existing gallery consumers.
   units: {
-    unit30: dash1,  // MCR Compressors
-    unit40: dash5,  // MCHE
-    unit50: dash6,  // Storage Tanks
-    unit60: dash8,  // Marine Berth Infrastructure
-    unit70: dash12, // Steam/Boilers
-    extra: [dash14, dash17, dash19, dash21]
+    unit30: unit30.src, unit40: unit40.src, unit50: unit50.src,
+    unit60: unit60.src, unit70: unit70.src,
+    extra: [14, 17, 19, 21].map((n) => imageSet(`dashboard-${n}`).src),
   },
-  
-  // Array lists for your dynamic layouts
-  about: [about2, about3, about4, about5, about8, about9, about18, about23],
-  // Remapped news assets to existing high-fidelity dashboard/about images to guarantee perfect Vite build
-  news: [dash14, dash17, dash19, dash21, about2, about3, about4, about5, about8]
 };
+
+export const newsHero = imageSet("news");

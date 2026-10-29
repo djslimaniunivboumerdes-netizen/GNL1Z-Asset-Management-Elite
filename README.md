@@ -19,8 +19,8 @@ Industrial LNG asset management platform for Sonatrach GL1/Z.
 
 ```bash
 # 1. Clone
-git clone https://github.com/djslimaniunivboumerdes-netizen/GNL1Z-Asset-Management.git
-cd GNL1Z-Asset-Management
+git clone https://github.com/djslimaniunivboumerdes-netizen/GNL1Z-Asset-Management-Elite.git
+cd GNL1Z-Asset-Management-Elite
 
 # 2. Install dependencies
 bun install
@@ -32,6 +32,16 @@ cp .env.example .env
 # 4. Run dev server
 bun run dev
 ```
+
+## Quality checks
+
+```bash
+npm run check   # TypeScript + ESLint + Vitest
+npm run build   # production bundle + generated PWA
+npm run preview
+```
+
+See [docs/ENHANCEMENTS.md](docs/ENHANCEMENTS.md) for the balanced reliability, mobile, and loading improvements and the isolated validation scope.
 
 ## GitHub Actions Secrets (Required for CI/CD)
 

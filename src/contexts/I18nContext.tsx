@@ -82,6 +82,7 @@ const DICT: Dict = {
   smartFlow: { en: "Smart Flow", fr: "Schéma Intelligent" },
   testSchedule: { en: "Test Schedule", fr: "Calendrier d'Essais" },
   fastAlerts: { en: "Fast Alerts", fr: "Alertes Rapides" },
+  alerts: { en: "Alert Center", fr: "Centre d'alertes" },
   signIn: { en: "Sign In", fr: "Connexion" },
   signOut: { en: "Sign Out", fr: "Déconnexion" },
   operatorProfile: { en: "Operator Profile", fr: "Profil Opérateur" },
@@ -123,8 +124,8 @@ interface I18nContextValue {
 const I18nContext = createContext<I18nContextValue | undefined>(undefined);
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [lang, setLang] = useState<Lang>(() => (localStorage.getItem("gnl1z-lang") as Lang) ?? "en");
-  useEffect(() => { localStorage.setItem("gnl1z-lang", lang); }, [lang]);
+  const [lang, setLang] = useState<Lang>(() => { try { return localStorage.getItem("gnl1z-lang") === "fr" ? "fr" : "en"; } catch { return "en"; } });
+  useEffect(() => { try { localStorage.setItem("gnl1z-lang", lang); } catch { /* Optional preference. */ } document.documentElement.lang = lang; }, [lang]);
   return (
     <I18nContext.Provider
       value={{

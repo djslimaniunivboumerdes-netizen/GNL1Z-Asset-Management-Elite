@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Generated compiler/test artifacts
+*.tsbuildinfo
+playwright-report
+test-results

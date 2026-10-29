@@ -199,7 +199,7 @@ export default function Manuals() {
           onClick={() => setDocMode(true)}
           className={[
             "inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-mono font-bold border transition-all",
-            docMode ? "bg-orange-500 text-white border-orange-500" : "border-border text-muted-foreground hover:border-orange-500/40",
+            docMode ? "bg-orange-500 text-foreground border-orange-500" : "border-border text-muted-foreground hover:border-orange-500/40",
           ].join(" ")}
         >
           <ScanText className="h-3.5 w-3.5" />
@@ -261,7 +261,7 @@ export default function Manuals() {
               )}
             </div>
             <Button onClick={() => void handleDocSearch()} disabled={docSearching || !docQuery.trim()}
-              className="h-11 px-5 bg-orange-500 hover:bg-orange-500/90 text-white font-mono gap-2">
+              className="h-11 px-5 bg-orange-500 hover:bg-orange-500/90 text-foreground font-mono gap-2">
               {docSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
               {lang === "en" ? "Search" : "Rechercher"}
             </Button>

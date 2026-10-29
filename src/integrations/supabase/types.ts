@@ -50,6 +50,7 @@ export interface Database {
           created_at?: string;
           updated_at?: string | null;
         };
+        Relationships: [];
       };
 
       maintenance_logs: {
@@ -104,6 +105,7 @@ export interface Database {
           result?: string | null;
           notes?: string | null;
         };
+        Relationships: [];
       };
 
       equipment_images: {
@@ -115,9 +117,7 @@ export interface Database {
           mime_type: string | null;
           size_bytes: number | null;
           uploaded_by: string | null;
-          uploaded_at: string;
-          equipment_id: string | null;
-          image_url: string | null;
+          created_at: string;
         };
         Insert: {
           id?: string;
@@ -127,9 +127,7 @@ export interface Database {
           mime_type?: string | null;
           size_bytes?: number | null;
           uploaded_by?: string | null;
-          uploaded_at?: string;
-          equipment_id?: string | null;
-          image_url?: string | null;
+          created_at?: string;
         };
         Update: {
           id?: string;
@@ -139,10 +137,9 @@ export interface Database {
           mime_type?: string | null;
           size_bytes?: number | null;
           uploaded_by?: string | null;
-          uploaded_at?: string;
-          equipment_id?: string | null;
-          image_url?: string | null;
+          created_at?: string;
         };
+        Relationships: [];
       };
 
       equipment_test_dates: {
@@ -164,6 +161,7 @@ export interface Database {
           next_test_due?: string | null;
           updated_at?: string;
         };
+        Relationships: [];
       };
 
       equipment_notes: {
@@ -185,6 +183,7 @@ export interface Database {
           notes?: string | null;
           created_at?: string;
         };
+        Relationships: [];
       };
 
       alerts: {
@@ -221,6 +220,7 @@ export interface Database {
           created_at?: string;
           updated_at?: string | null;
         };
+        Relationships: [];
       };
 
       fast_alerts: {
@@ -254,6 +254,7 @@ export interface Database {
           status?: string;
           created_at?: string;
         };
+        Relationships: [];
       };
 
       dcs_detected_instruments: {
@@ -275,6 +276,7 @@ export interface Database {
           model?: string | null;
           detected_at?: string;
         };
+        Relationships: [];
       };
 
       news_cache: {
@@ -293,6 +295,7 @@ export interface Database {
           data?: Json;
           fetched_at?: string;
         };
+        Relationships: [];
       };
 
       ai_responses_cache: {
@@ -326,6 +329,7 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [];
       };
 
       profiles: {
@@ -347,6 +351,7 @@ export interface Database {
           role?: string | null;
           created_at?: string;
         };
+        Relationships: [];
       };
     };
 

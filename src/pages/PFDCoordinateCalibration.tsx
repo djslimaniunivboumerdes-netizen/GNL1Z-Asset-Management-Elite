@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
-import { extractTagCoordinates } from "@/utils/extractTagCoordinates";
-import { useState, useRef } from "react";
+import { extractTagCoordinates, type OCRTag } from "@/utils/extractTagCoordinates";
 
 export default function PFDCoordinateCalibration() {
-  const [tags, setTags] = useState<any[]>([]);
+  const [tags, setTags] = useState<OCRTag[]>([]);
 
   useEffect(() => {
     extractTagCoordinates("/pfd/gnl1z-pfd-labeled.png")

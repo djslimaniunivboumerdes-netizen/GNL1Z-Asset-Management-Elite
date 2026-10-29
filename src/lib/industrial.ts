@@ -189,22 +189,27 @@ function estimateTempByType(code: string): number {
   }
 }
 
-// CSV export
+// CSV export. Protect spreadsheet consumers from formula injection as well as
+// preserving commas, quotes, newlines and Unicode in technical descriptions.
+export function serializeCsv(rows: Record<string, unknown>[]): string {
+  const headers = [...new Set(rows.flatMap((row) => Object.keys(row)))];
+  const escape = (value: unknown) => {
+    let text = value == null ? "" : typeof value === "string" ? value : String(value);
+    if (/^[\s]*[=+@-]/.test(text) || /^[\t\r]/.test(text)) text = `'${text}`;
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+  return [headers.map(escape).join(","), ...rows.map((row) => headers.map((key) => escape(row[key])).join(","))].join("\r\n");
+}
+
 export function exportToCsv(filename: string, rows: Record<string, unknown>[]) {
   if (!rows.length) return;
-  const headers = Object.keys(rows[0]);
-  const escape = (v: unknown) => {
-    if (v == null) return "";
-    const s = typeof v === "string" ? v : JSON.stringify(v);
-    if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-    return s;
-  };
-  const csv = [headers.join(","), ...rows.map((r) => headers.map((h) => escape(r[h])).join(","))].join("\n");
-  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+  const blob = new Blob(["\uFEFF" + serializeCsv(rows)], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

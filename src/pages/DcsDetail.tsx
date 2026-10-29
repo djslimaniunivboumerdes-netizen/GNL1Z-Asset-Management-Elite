@@ -59,8 +59,6 @@ export default function DcsDetail() {
     return () => { active = false; };
   }, [panel]);
 
-  if (!panel) return <NotFound />;
-
   const detect = async (force = false) => {
     setLoading(true);
     try {
@@ -108,14 +106,14 @@ export default function DcsDetail() {
       }
     }
 
-    for (const tag of panel.related_tags ?? []) {
+    for (const tag of panel?.related_tags ?? []) {
       const eq = getEquipmentByTag(tag);
       if (eq) map.set(eq.tag, eq);
     }
 
-    if (panel.unit) {
+    if (panel?.unit) {
       for (const eq of EQUIPMENT) {
-        if (eq.unit === panel.unit) map.set(eq.tag, eq);
+        if (eq.unit === panel?.unit) map.set(eq.tag, eq);
       }
     }
 
@@ -128,26 +126,28 @@ export default function DcsDetail() {
     return getEquipmentTagsFromDcsTags(tags);
   }, [tags]);
 
+  if (!panel) return <NotFound />;
+
   return (
     <div className="px-4 md:px-8 py-6 md:py-8 max-w-7xl mx-auto space-y-6">
-      <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:text-white hover:bg-slate-900 rounded-xl px-3 py-2">
+      <Button asChild variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground hover:bg-card rounded-xl px-3 py-2">
         <Link to="/dcs"><ArrowLeft className="h-4 w-4 mr-2" /> {t("back")}</Link>
       </Button>
 
       {/* Hero Header */}
-      <div className="relative overflow-hidden border border-slate-800 rounded-3xl bg-slate-900/60 p-6 md:p-10 shadow-2xl backdrop-blur-md text-white">
+      <div className="relative overflow-hidden border border-border rounded-3xl bg-secondary/60 p-6 md:p-10 shadow-2xl backdrop-blur-md text-foreground">
         <div className="absolute top-0 right-0 w-72 h-72 bg-sky-500/10 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-sky-500 via-blue-500 to-indigo-500" />
         <div className="relative">
-          <div className="flex items-center gap-2 text-xs text-cyan-400 font-mono uppercase tracking-widest mb-3 font-bold">
-            <Cpu className="h-4 w-4 text-cyan-500" /> {t("panelDetail")}
+          <div className="flex items-center gap-2 text-xs text-cyan-700 dark:text-cyan-400 font-mono uppercase tracking-widest mb-3 font-bold">
+            <Cpu className="h-4 w-4 text-cyan-700 dark:text-cyan-400" /> {t("panelDetail")}
           </div>
-          <h1 className="text-3xl md:text-5xl font-display font-bold tracking-tight text-white">
+          <h1 className="text-3xl md:text-5xl font-display font-bold tracking-tight text-foreground">
             {lang === "en" ? panel.title_en : panel.title_fr}
           </h1>
           <div className="flex flex-wrap gap-2.5 mt-4">
-            <Badge className="bg-slate-800 border border-slate-700 text-slate-200 font-mono px-3 py-1 rounded-full text-xs">{panel.section}</Badge>
-            {panel.unit && <Badge className="bg-slate-800 border border-slate-700 text-slate-200 font-mono px-3 py-1 rounded-full text-xs">{panel.unit}</Badge>}
+            <Badge className="bg-secondary border border-border text-foreground font-mono px-3 py-1 rounded-full text-xs">{panel.section}</Badge>
+            {panel.unit && <Badge className="bg-secondary border border-border text-foreground font-mono px-3 py-1 rounded-full text-xs">{panel.unit}</Badge>}
             {highlightTag && (
               <Badge className="bg-amber-500/20 border border-amber-500/30 text-amber-300 font-mono px-3 py-1 rounded-full text-xs animate-pulse">
                 {lang === "en" ? "Target Instrument:" : "Instrument Cible :"} {highlightTag}
@@ -155,7 +155,7 @@ export default function DcsDetail() {
             )}
           </div>
           {(panel.description_en || panel.description_fr) && (
-            <p className="mt-4 text-slate-300 max-w-3xl text-base leading-relaxed font-light">
+            <p className="mt-4 text-muted-foreground max-w-3xl text-base leading-relaxed font-light">
               {lang === "en" ? panel.description_en : panel.description_fr}
             </p>
           )}
@@ -163,30 +163,30 @@ export default function DcsDetail() {
       </div>
 
       {/* DCS Screen */}
-      <div className="border border-slate-800 rounded-3xl overflow-hidden bg-slate-900/40 shadow-2xl backdrop-blur-sm">
-        <div className="bg-slate-950/60 px-6 py-4 flex items-center justify-between border-b border-slate-800">
-          <span className="text-xs uppercase tracking-widest text-slate-400 font-mono font-bold">DCS Screen</span>
-          <Button asChild variant="outline" size="sm" className="bg-slate-800 border-slate-700 text-slate-200 hover:text-white rounded-xl gap-2 font-mono text-xs cursor-pointer shadow-md">
+      <div className="border border-border rounded-3xl overflow-hidden bg-secondary/40 shadow-2xl backdrop-blur-sm">
+        <div className="bg-secondary/60 px-6 py-4 flex items-center justify-between border-b border-border">
+          <span className="text-xs uppercase tracking-widest text-muted-foreground font-mono font-bold">DCS Screen</span>
+          <Button asChild variant="outline" size="sm" className="bg-secondary border-border text-foreground hover:text-foreground rounded-xl gap-2 font-mono text-xs cursor-pointer shadow-md">
             <a href={dcsImageViewUrl(panel.storage_path)} target="_blank" rel="noopener noreferrer">
-              {t("openInDrive")} <ExternalLink className="h-4 w-4 text-cyan-400" />
+              {t("openInDrive")} <ExternalLink className="h-4 w-4 text-cyan-700 dark:text-cyan-400" />
             </a>
           </Button>
         </div>
-        <div className="relative bg-slate-950 w-full p-4 md:p-6" style={{ aspectRatio: "16/9" }}>
+        <div className="relative bg-background w-full p-4 md:p-6" style={{ aspectRatio: "16/9" }}>
           {!imgLoaded && !imgError && (
-            <div className="absolute inset-0 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm rounded-2xl">
-              <div className="flex flex-col items-center gap-3 text-slate-400">
-                <Cpu className="h-8 w-8 animate-pulse text-cyan-500" />
+            <div className="absolute inset-0 flex items-center justify-center bg-secondary/50 backdrop-blur-sm rounded-2xl">
+              <div className="flex flex-col items-center gap-3 text-muted-foreground">
+                <Cpu className="h-8 w-8 animate-pulse text-cyan-700 dark:text-cyan-400" />
                 <span className="text-xs font-mono uppercase tracking-widest">{lang === "en" ? "Loading DCS Screen…" : "Chargement de l'écran DCS…"}</span>
               </div>
             </div>
           )}
           {imgError && (
-            <div className="absolute inset-0 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm rounded-2xl">
-              <div className="flex flex-col items-center gap-3 text-slate-400">
+            <div className="absolute inset-0 flex items-center justify-center bg-secondary/50 backdrop-blur-sm rounded-2xl">
+              <div className="flex flex-col items-center gap-3 text-muted-foreground">
                 <ImageOff className="h-12 w-12 text-rose-500/50" />
-                <span className="text-sm font-bold text-white">{lang === "en" ? "DCS Image Unavailable" : "Image DCS Indisponible"}</span>
-                <span className="text-xs font-mono text-slate-500 max-w-xs text-center">
+                <span className="text-sm font-bold text-foreground">{lang === "en" ? "DCS Image Unavailable" : "Image DCS Indisponible"}</span>
+                <span className="text-xs font-mono text-muted-foreground max-w-xs text-center">
                   {lang === "en" ? "Image not found in Supabase Storage." : "Image introuvable dans le stockage Supabase."}
                 </span>
               </div>
@@ -195,47 +195,47 @@ export default function DcsDetail() {
           <StorageImg
             storagePath={panel.storage_path}
             alt={lang === "en" ? panel.title_en : panel.title_fr}
-            className={`w-full h-full object-contain rounded-xl border border-slate-800/80 shadow-2xl ${imgError ? 'hidden' : ''}`}
+            className={`w-full h-full object-contain rounded-xl border border-border shadow-2xl ${imgError ? 'hidden' : ''}`}
             fallbackClassName="flex flex-col items-center justify-center gap-3 text-white/30 w-full h-full"
           />
         </div>
       </div>
 
       {/* Detected Instrument Tags */}
-      <div className="border border-slate-800 rounded-3xl bg-slate-900/40 p-8 backdrop-blur-sm shadow-xl space-y-6">
+      <div className="border border-border rounded-3xl bg-secondary/40 p-8 backdrop-blur-sm shadow-xl space-y-6">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
+            <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-700 dark:text-cyan-400">
               <Tag className="h-5 w-5" />
             </div>
-            <h2 className="text-xl font-bold text-white tracking-tight">
+            <h2 className="text-xl font-bold text-foreground tracking-tight">
               {lang === "en" ? "Detected Instrument Tags" : "Tags d'instruments détectés"}
             </h2>
-            {tags && <Badge variant="outline" className="font-mono text-xs bg-slate-800 text-slate-300 border-slate-700 px-3 py-1 rounded-full ml-2">{tags.length}</Badge>}
+            {tags && <Badge variant="outline" className="font-mono text-xs bg-secondary text-muted-foreground border-border px-3 py-1 rounded-full ml-2">{tags.length}</Badge>}
           </div>
           <div className="flex gap-3">
             {(!tags || tags.length === 0) && (
               <Button onClick={() => detect(false)} disabled={loading} size="sm" className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold gap-2 rounded-xl px-5 py-5 shadow-lg shadow-cyan-600/20 font-mono text-xs transition-all">
-                <Sparkles className="h-4 w-4 text-cyan-300" /> {loading ? "…" : (lang === "en" ? "Detect with AI" : "Détecter avec AI")}
+                <Sparkles className="h-4 w-4 text-cyan-700 dark:text-cyan-300" /> {loading ? "…" : (lang === "en" ? "Detect with AI" : "Détecter avec AI")}
               </Button>
             )}
             {tags && tags.length > 0 && (
-              <Button onClick={() => detect(true)} disabled={loading} size="sm" variant="outline" className="bg-slate-800 border-slate-700 text-slate-200 hover:text-white rounded-xl py-5 px-5 font-mono text-xs gap-2 cursor-pointer shadow-md">
-                <RefreshCw className={`h-4 w-4 text-cyan-400 ${loading ? "animate-spin" : ""}`} /> {lang === "en" ? "Re-scan" : "Re-scanner"}
+              <Button onClick={() => detect(true)} disabled={loading} size="sm" variant="outline" className="bg-secondary border-border text-foreground hover:text-foreground rounded-xl py-5 px-5 font-mono text-xs gap-2 cursor-pointer shadow-md">
+                <RefreshCw className={`h-4 w-4 text-cyan-700 dark:text-cyan-400 ${loading ? "animate-spin" : ""}`} /> {lang === "en" ? "Re-scan" : "Re-scanner"}
               </Button>
             )}
           </div>
         </div>
         {tags === null ? (
-          <p className="text-sm text-slate-500 font-mono animate-pulse">…</p>
+          <p className="text-sm text-muted-foreground font-mono animate-pulse">…</p>
         ) : tags.length === 0 ? (
-          <p className="text-sm text-slate-400 font-light bg-slate-950/60 p-6 rounded-2xl border border-slate-800/80 text-center">
+          <p className="text-sm text-muted-foreground font-light bg-secondary/60 p-6 rounded-2xl border border-border text-center">
             {lang === "en"
               ? "No tags detected yet. Click 'Detect with AI' to scan this DCS screen with vision AI."
               : "Aucun tag détecté. Cliquez 'Détecter avec AI' pour scanner cet écran DCS."}
           </p>
         ) : (
-          <div className="flex flex-wrap gap-2 bg-slate-950/40 p-6 rounded-2xl border border-slate-800 shadow-inner max-h-[220px] overflow-y-auto">
+          <div className="flex flex-wrap gap-2 bg-secondary/40 p-6 rounded-2xl border border-border shadow-inner max-h-[220px] overflow-y-auto">
             {aiTags.map((tg) => {
               const isHi = highlightTag && tg.toUpperCase() === highlightTag;
               const hasMapping = mappedEquipmentTags.includes(tg);
@@ -246,8 +246,8 @@ export default function DcsDetail() {
                     isHi
                       ? "border-amber-500 bg-amber-500 text-slate-950 ring-4 ring-amber-500/40 animate-pulse shadow-xl scale-110 z-10"
                       : hasMapping
-                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400 shadow-sm"
-                        : "border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-600 shadow-sm"
+                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 shadow-sm"
+                        : "border-border bg-card text-muted-foreground hover:border-slate-600 shadow-sm"
                   }`}
                   title={hasMapping ? (lang === "en" ? "Mapped to equipment" : "Relié à un équipement") : (lang === "en" ? "No equipment mapping" : "Non relié")}
                 >
@@ -260,12 +260,12 @@ export default function DcsDetail() {
       </div>
 
       {/* Related Equipment */}
-      <div className="border border-slate-800 rounded-3xl bg-slate-900/40 p-8 backdrop-blur-sm shadow-xl space-y-6">
-        <h2 className="text-xl font-bold text-white tracking-tight mb-2">
+      <div className="border border-border rounded-3xl bg-secondary/40 p-8 backdrop-blur-sm shadow-xl space-y-6">
+        <h2 className="text-xl font-bold text-foreground tracking-tight mb-2">
           {lang === "en" ? "Related Equipment" : "Équipement Relié"}
         </h2>
         {related.length === 0 ? (
-          <p className="text-sm text-slate-400 font-light bg-slate-950/60 p-6 rounded-2xl border border-slate-800/80 text-center">
+          <p className="text-sm text-muted-foreground font-light bg-secondary/60 p-6 rounded-2xl border border-border text-center">
             {lang === "en" ? "No equipment linked yet to this panel." : "Aucun équipement lié à ce panneau."}
           </p>
         ) : (
@@ -274,19 +274,19 @@ export default function DcsDetail() {
               <Link
                 key={eq.tag}
                 to={`/equipment/${encodeURIComponent(eq.tag)}`}
-                className="group flex items-center justify-between border border-slate-800 rounded-2xl p-5 bg-slate-900/50 hover:border-cyan-500/50 hover:bg-slate-800/60 transition-all shadow-md backdrop-blur-sm"
+                className="group flex items-center justify-between border border-border rounded-2xl p-5 bg-secondary/50 hover:border-cyan-500/50 hover:bg-secondary/60 transition-all shadow-md backdrop-blur-sm"
               >
                 <div className="min-w-0 pr-4">
-                  <div className="font-mono text-xs text-cyan-400 font-bold mb-1">{eq.tag}</div>
-                  <div className="text-sm font-bold text-white truncate">{eq.name}</div>
+                  <div className="font-mono text-xs text-cyan-700 dark:text-cyan-400 font-bold mb-1">{eq.tag}</div>
+                  <div className="text-sm font-bold text-foreground truncate">{eq.name}</div>
                 </div>
-                <ArrowRight className="h-4 w-4 text-slate-400 group-hover:text-cyan-400 group-hover:translate-x-0.5 transition-all shrink-0" />
+                <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-cyan-400 group-hover:translate-x-0.5 transition-all shrink-0" />
               </Link>
             ))}
           </div>
         )}
       </div>
-      <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:text-white hover:bg-slate-900 rounded-xl px-3 py-2">
+      <Button asChild variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground hover:bg-card rounded-xl px-3 py-2">
         <Link to="/dcs"><ArrowLeft className="h-4 w-4 mr-2" /> {t("back")}</Link>
       </Button>
     </div>

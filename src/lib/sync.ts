@@ -1,100 +1,98 @@
-import { idb } from "./db";
-import { supabase } from "@/integrations/supabase/client";
-import { runAlertEngine } from "./alertEngine";
+import { idb, type PendingLog, type PendingUpload } from "./db";
+import { supabase, isSupabaseConfigured } from "@/integrations/supabase/client";
 
 let running = false;
+export const SYNC_EVENT = "gnl1z:sync-change";
+const notify = () => window.dispatchEvent(new Event(SYNC_EVENT));
+const messageOf = (error: unknown) => {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error && typeof error.message === "string") return error.message;
+  return "Connection interrupted. Your record is still queued.";
+};
 
+/** Queue entries are removed only after confirmed persistence, never on auth/RLS errors. */
 export async function flushQueue(): Promise<{ logs: number; uploads: number; errors: number }> {
-  if (running || !navigator.onLine) return { logs: 0, uploads: 0, errors: 0 };
+  const result = { logs: 0, uploads: 0, errors: 0 };
+  if (running || !navigator.onLine || !isSupabaseConfigured) return result;
   running = true;
-  let logs = 0, uploads = 0, errors = 0;
-  let hasUpdates = false;
-
+  notify();
   try {
-    // Process Logs
-    const pendingLogs = await idb.pendingLogs.toArray();
-    for (const log of pendingLogs) {
-      const { id, ...payload } = log;
-      const { error } = await supabase.from("maintenance_logs").insert(payload);
-      
-      if (error) {
-        errors++;
-        console.error("[GNL1Z Sync] Failed to sync log:", error);
-        // If it's a non-retriable client/auth/RLS error (e.g., 400, 401, 403, 409), remove from queue
-        if (error.code && (error.code.startsWith("P") || error.code.startsWith("4"))) {
-          console.warn(`[GNL1Z Sync] Non-retriable error (${error.code}). Discarding invalid log from queue.`);
-          if (id) await idb.pendingLogs.delete(id);
-        }
-        continue;
-      }
-      
-      if (id) await idb.pendingLogs.delete(id);
-      logs++;
-      hasUpdates = true;
-    }
+    const { data: sessionData } = await supabase.auth.getSession();
+    const user = sessionData.session?.user;
+    if (!user) return result;
 
-    // Process Uploads
-    const pendingUploads = await idb.pendingUploads.toArray();
-    for (const up of pendingUploads) {
-      const path = `${up.tag}/${Date.now()}-${up.file_name}`;
-      const { error: upErr } = await supabase.storage.from("equipment-photos").upload(path, up.blob, {
-        contentType: up.mime_type,
-        upsert: false,
-      });
-
-      if (upErr) {
-        errors++;
-        console.error("[GNL1Z Sync] Failed to upload photo:", upErr);
-        if ((upErr as any).statusCode && (upErr as any).statusCode >= 400 && (upErr as any).statusCode < 500) {
-          console.warn("[GNL1Z Sync] Non-retriable storage error. Discarding invalid upload from queue.");
-          if (up.id) await idb.pendingUploads.delete(up.id);
-        }
-        continue;
-      }
-
-      const { error: insErr } = await supabase.from("equipment_images").insert({
-        tag: up.tag,
-        file_path: path,
-        file_name: up.file_name,
-        mime_type: up.mime_type,
-        size_bytes: up.blob.size,
-        uploaded_by: up.uploaded_by,
-      });
-
-      if (insErr) {
-        errors++;
-        console.error("[GNL1Z Sync] Failed to record photo metadata:", insErr);
-        if (insErr.code && (insErr.code.startsWith("P") || insErr.code.startsWith("4"))) {
-          if (up.id) await idb.pendingUploads.delete(up.id);
-        }
-        continue;
-      }
-
-      if (up.id) await idb.pendingUploads.delete(up.id);
-      uploads++;
-      hasUpdates = true;
-    }
-
-    // Run Alert Engine client-side if any logs or uploads were successfully synced
-    if (hasUpdates) {
+    for (const log of await idb.pendingLogs.toArray()) {
+      if (!log.id || log.performed_by !== user.id) continue;
+      const clientId = log.client_id ?? crypto.randomUUID();
       try {
-        await runAlertEngine();
-        console.log("[GNL1Z Sync] Alert engine completed successfully post-sync.");
-      } catch (alertErr) {
-        console.error("[GNL1Z Sync] Alert engine encountered an error:", alertErr);
+        const { client_id: _clientId, id: _localId, next_test_due, last_error: _error, ...payload } = log;
+        const { error } = await supabase.from("maintenance_logs").insert({ ...payload, id: clientId });
+        // A previous attempt may have committed before the connection dropped.
+        if (error && error.code !== "23505") throw new Error(error.message);
+        if (log.result === "PASS" && next_test_due) {
+          const { data: current, error: readError } = await supabase.from("equipment_test_dates")
+            .select("last_tested").eq("tag", log.tag).maybeSingle();
+          if (readError) throw new Error(readError.message);
+          // A queued historical test must not roll back a more recent passed test.
+          if (!current?.last_tested || current.last_tested <= log.test_date) {
+            const { error: scheduleError } = await supabase.from("equipment_test_dates").upsert({
+              tag: log.tag, last_tested: log.test_date, next_test_due, updated_at: new Date().toISOString(),
+            }, { onConflict: "tag" });
+            if (scheduleError) throw new Error(scheduleError.message);
+          }
+        }
+        await idb.pendingLogs.delete(log.id);
+        result.logs++;
+      } catch (error) {
+        result.errors++;
+        await idb.pendingLogs.update(log.id, { client_id: clientId, last_error: messageOf(error) });
       }
     }
 
+    for (const upload of await idb.pendingUploads.toArray()) {
+      if (!upload.id || upload.uploaded_by !== user.id) continue;
+      const clientId = upload.client_id ?? crypto.randomUUID();
+      const path = upload.upload_path ?? `${upload.tag}/${clientId}.webp`;
+      try {
+        await idb.pendingUploads.update(upload.id, { client_id: clientId, upload_path: path });
+        const { error } = await supabase.storage.from("equipment-photos").upload(path, upload.blob, { contentType: upload.mime_type, upsert: false });
+        // Stable, per-record paths make a repeated upload safe after a partial failure.
+        if (error && !(error.message.toLowerCase().includes("already exists") || (error as { statusCode?: string }).statusCode === "409")) throw error;
+        const { error: metadataError } = await supabase.from("equipment_images").insert({
+          id: clientId, tag: upload.tag, file_path: path, file_name: upload.file_name,
+          mime_type: upload.mime_type, size_bytes: upload.blob.size, uploaded_by: user.id, created_at: upload.created_at,
+        });
+        if (metadataError && metadataError.code !== "23505") throw metadataError;
+        await idb.pendingUploads.delete(upload.id);
+        result.uploads++;
+      } catch (error) {
+        result.errors++;
+        await idb.pendingUploads.update(upload.id, { last_error: messageOf(error) });
+      }
+    }
+    return result;
   } finally {
     running = false;
+    notify();
   }
-  return { logs, uploads, errors };
 }
 
-export function initSync() {
-  window.addEventListener("online", () => { void flushQueue(); });
-  // Periodic retry every 60s
-  setInterval(() => { void flushQueue(); }, 60_000);
-  // Initial attempt
-  setTimeout(() => { void flushQueue(); }, 2000);
+export function getSyncStatus() { return running; }
+
+export function initSync(): () => void {
+  const retry = () => { void flushQueue().catch(() => notify()); };
+  window.addEventListener("online", retry);
+  const { data } = supabase.auth.onAuthStateChange((event) => {
+    if (event === "SIGNED_IN") window.setTimeout(retry, 0);
+  });
+  const interval = window.setInterval(retry, 60_000);
+  const initial = window.setTimeout(retry, 2000);
+  return () => {
+    window.removeEventListener("online", retry);
+    window.clearInterval(interval);
+    window.clearTimeout(initial);
+    data.subscription.unsubscribe();
+  };
 }
+
+export type { PendingLog, PendingUpload };

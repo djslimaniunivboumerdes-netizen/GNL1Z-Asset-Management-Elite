@@ -98,7 +98,7 @@ function PlatformCard({
       <div className={`h-0.5 w-full ${accent}`} />
       <div className="p-5">
         <div className="flex items-start justify-between mb-4">
-          <div className={`h-11 w-11 rounded-xl ${accent} flex items-center justify-center text-white`}>
+          <div className={`h-11 w-11 rounded-xl ${accent} flex items-center justify-center text-foreground`}>
             {icon}
           </div>
           <div className="flex items-center gap-2">
@@ -127,7 +127,7 @@ function PlatformCard({
           <ol className="space-y-2 mb-4">
             {steps.map((s, i) => (
               <li key={i} className="flex items-start gap-2.5 text-sm text-muted-foreground">
-                <span className={`flex-shrink-0 h-5 w-5 rounded-full ${accent} flex items-center justify-center text-[10px] font-bold text-white mt-0.5`}>
+                <span className={`flex-shrink-0 h-5 w-5 rounded-full ${accent} flex items-center justify-center text-[10px] font-bold text-foreground mt-0.5`}>
                   {i + 1}
                 </span>
                 {s}
@@ -141,7 +141,7 @@ function PlatformCard({
           disabled={!available}
           className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-medium text-sm transition-all duration-150 ${
             available
-              ? `${accent} text-white hover:opacity-90 active:scale-[0.98]`
+              ? `${accent} text-foreground hover:opacity-90 active:scale-[0.98]`
               : "bg-muted text-muted-foreground cursor-not-allowed"
           }`}
         >

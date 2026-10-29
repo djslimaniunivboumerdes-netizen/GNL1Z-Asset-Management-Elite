@@ -1,84 +1,24 @@
-// src/components/EquipmentTestStatus.tsx
-// Drop-in widget for EquipmentDetail.tsx — shows Last Test / Next Due / Remaining Days
-// for a single equipment tag. Add it inside TechInfoTab, right above or below
-// the existing <TestDatesEditor /> block.
-
-import { useEffect, useState } from "react";
-import { CalendarClock, AlertTriangle } from "lucide-react";
-import { buildSchedule } from "@/lib/alertEngine";
-import type { ScheduleItem } from "@/types/alerts";
-import { Badge } from "@/components/ui/badge";
+import { CalendarClock } from "lucide-react";
+import { useSchedule } from "@/hooks/useSchedule";
+import { useI18n } from "@/contexts/I18nContext";
+import { ScheduleStatusBadge } from "./ScheduleStatusBadge";
 
 export function EquipmentTestStatus({ tag }: { tag: string }) {
-  const [item, setItem] = useState<ScheduleItem | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let active = true;
-    buildSchedule().then((all) => {
-      if (!active) return;
-      setItem(all.find((i) => i.tag === tag) ?? null);
-      setLoading(false);
-    });
-    return () => { active = false; };
-  }, [tag]);
-
-  if (loading) {
-    return (
-      <div className="border border-border rounded-lg bg-card p-5">
-        <div className="text-xs text-muted-foreground">Loading test schedule…</div>
-      </div>
-    );
-  }
-
-  if (!item || (!item.last_test && !item.next_due)) {
-    return null; // nothing recorded yet — don't clutter the page
-  }
-
-  const statusColor =
-    item.status === "OVERDUE"  ? "text-red-500"
-    : item.status === "DUE_SOON" ? "text-amber-500"
-    : "text-emerald-500";
-
+  const { items, loading, errorMessage, isReference } = useSchedule();
+  const { lang } = useI18n();
+  const L = (en: string, fr: string) => lang === "fr" ? fr : en;
+  const item = items.find((entry) => entry.tag === tag);
   return (
-    <div className="border border-border rounded-lg bg-card p-5">
-      <div className="flex items-center gap-2 mb-4">
-        <CalendarClock className="h-4 w-4 text-accent" />
-        <h3 className="font-display font-semibold">Test Schedule</h3>
-        {item.status === "OVERDUE" && (
-          <Badge className="bg-red-600 text-white text-[10px] ml-1">OVERDUE</Badge>
-        )}
-        {item.status === "DUE_SOON" && (
-          <Badge className="bg-amber-500 text-white text-[10px] ml-1">DUE SOON</Badge>
-        )}
-        {item.status === "OK" && (
-          <Badge variant="outline" className="text-emerald-500 border-emerald-500/40 text-[10px] ml-1">OK</Badge>
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="border border-border rounded bg-secondary/40 p-3">
-          <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1.5">Last Test</div>
-          <div className="font-mono font-bold text-lg">{item.last_test ?? "—"}</div>
-        </div>
-        <div className="border border-border rounded bg-secondary/40 p-3">
-          <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1.5">Next Due</div>
-          <div className="font-mono font-bold text-lg">{item.next_due ?? "—"}</div>
-        </div>
-        <div className="border border-border rounded bg-secondary/40 p-3">
-          <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1.5 flex items-center gap-1">
-            {item.status === "OVERDUE" && <AlertTriangle className="h-3 w-3 text-red-500" />}
-            Remaining Days
-          </div>
-          <div className={`font-mono font-bold text-lg ${statusColor}`}>
-            {item.days_left === null
-              ? "—"
-              : item.days_left < 0
-              ? `−${Math.abs(item.days_left)}d`
-              : `${item.days_left}d`}
-          </div>
-        </div>
-      </div>
-    </div>
+    <section className="rounded-xl border border-border bg-card p-5 text-card-foreground">
+      <div className="mb-4 flex flex-wrap items-center gap-2"><CalendarClock className="h-4 w-4 text-cyan-600 dark:text-cyan-400" /><h3 className="font-semibold">{L("Test schedule", "Calendrier des essais")}</h3>{item && <ScheduleStatusBadge status={item.status} />}</div>
+      {loading ? <p role="status" className="text-sm text-muted-foreground">{L("Loading test dates…", "Chargement des dates…")}</p>
+        : errorMessage ? <p role="alert" className="text-sm text-muted-foreground">{L("Test dates are unavailable. Please retry from the schedule.", "Dates indisponibles. Réessayez depuis le calendrier.")}</p>
+        : item ? <>
+          <dl className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {[[L("Last passed test", "Dernier essai réussi"), item.last_test], [L("Next due", "Prochaine échéance"), item.next_due], [L("Days remaining", "Jours restants"), item.days_left]].map(([label, value]) => <div key={String(label)} className="rounded-lg bg-muted/60 p-3"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 font-mono text-base font-medium">{value ?? "—"}</dd></div>)}
+          </dl>
+          <p className="mt-3 text-xs text-muted-foreground">{isReference ? L("Source: local equipment register", "Source : référentiel local") : item.source === "register" ? L("Source: equipment register; no newer passed test or override found.", "Source : référentiel ; aucun essai réussi récent ni remplacement trouvé.") : item.source === "override" ? L("Source: manually confirmed schedule", "Source : calendrier confirmé manuellement") : L("Source: latest passed maintenance log and planning interval", "Source : dernier essai réussi et intervalle de planification")}</p>
+        </> : null}
+    </section>
   );
 }

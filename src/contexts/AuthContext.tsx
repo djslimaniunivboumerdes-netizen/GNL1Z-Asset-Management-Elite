@@ -1,7 +1,7 @@
 // src/contexts/AuthContext.tsx
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import type { Session, User } from "@supabase/supabase-js";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, isSupabaseConfigured } from "@/integrations/supabase/client";
 
 interface AuthContextType {
   user: User | null;
@@ -31,8 +31,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let active = true;
+    if (!isSupabaseConfigured) { setLoading(false); return; }
     // 1. Subscribe FIRST so we never miss a SIGNED_IN event from an OAuth callback
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+      if (!active) return;
       setSession(s);
       setUser(s?.user ?? null);
       setLoading(false);        // ← also resolve loading on any auth state change
@@ -40,12 +43,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     // 2. Hydrate the existing session (covers page refresh, localStorage restore)
     supabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
       setSession(data.session);
       setUser(data.session?.user ?? null);
-      setLoading(false);
-    });
+    }).catch(() => {
+      if (!active) return;
+      setSession(null);
+      setUser(null);
+    }).finally(() => { if (active) setLoading(false); });
 
-    return () => subscription.unsubscribe();
+    return () => { active = false; subscription.unsubscribe(); };
   }, []);
 
   // ── Email + password sign-in ──────────────────────────────────────────────

@@ -27,7 +27,7 @@ export default function Author() {
       <div className="text-[10px] uppercase tracking-widest text-accent font-mono mb-1">/ {t("author")}</div>
 
       {/* Hero card */}
-      <div className="relative overflow-hidden border border-border rounded-lg bg-gradient-industrial p-8 md:p-10 text-white mb-8">
+      <div className="relative overflow-hidden border border-border rounded-lg bg-gradient-industrial p-8 md:p-10 text-foreground mb-8">
         <div className="absolute -top-20 -right-20 w-72 h-72 bg-accent/20 rounded-full blur-3xl" />
         <div className="absolute top-0 left-0 right-0 h-1 stripe-warning" />
         <div className="relative flex items-start gap-6 flex-wrap">
@@ -77,7 +77,7 @@ export default function Author() {
             <div className="p-5 space-y-3">
               <div className="flex items-center gap-3">
                 <div className="h-10 w-10 rounded-xl bg-emerald-500/10 flex items-center justify-center shrink-0">
-                  <Smartphone className="h-5 w-5 text-emerald-400" />
+                  <Smartphone className="h-5 w-5 text-emerald-700 dark:text-emerald-400" />
                 </div>
                 <div>
                   <div className="font-display font-bold">Android</div>
@@ -92,7 +92,7 @@ export default function Author() {
               </ol>
               <div className="flex gap-2 pt-1">
                 <a href="https://www.pwabuilder.com/?url=https://gnl1z.dj-slimani-univ-boumerdes.workers.dev" target="_blank" rel="noopener noreferrer"
-                   className="flex-1 inline-flex items-center justify-center gap-1.5 text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-lg px-3 py-2.5 hover:bg-emerald-500/20 transition-colors">
+                   className="flex-1 inline-flex items-center justify-center gap-1.5 text-xs font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 rounded-lg px-3 py-2.5 hover:bg-emerald-500/20 transition-colors">
                   <Download className="h-3.5 w-3.5" />
                   {lang === "en" ? "Generate APK (PWABuilder)" : "Générer APK (PWABuilder)"}
                 </a>

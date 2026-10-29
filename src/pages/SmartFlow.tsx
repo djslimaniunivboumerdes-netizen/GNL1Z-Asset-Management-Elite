@@ -626,7 +626,7 @@ export default function SmartProcessFlow() {
       : { text: "text-sky-400", bg: "bg-sky-500/10", border: "border-sky-500/40" };
 
   return (
-    <div className="relative flex flex-col h-[calc(100vh-4rem)] bg-slate-950 text-white font-sans overflow-hidden select-none">
+    <div className="dark relative flex flex-col h-[calc(100vh-4rem)] bg-slate-950 text-white font-sans overflow-hidden select-none">
       
       {/* PREMIUM TOP SUPERVISORY BAR */}
       <div className="flex flex-wrap items-center justify-between gap-4 px-4 md:px-8 py-3 bg-slate-900/90 border-b border-slate-800 backdrop-blur-xl z-30 shadow-2xl">
@@ -651,7 +651,7 @@ export default function SmartProcessFlow() {
               <h1 className="text-sm font-bold text-white tracking-tight flex items-center gap-2">
                 {L("Smart Process Flow", "Schéma Intelligent")}
                 <span className="text-[10px] bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 px-2 py-0.5 rounded-full font-mono animate-pulse">
-                  {L("LIVE DCS TELEMETRY", "TÉLÉMESURE EN DIRECT")}
+                  {L("SIMULATED TELEMETRY", "TÉLÉMESURE SIMULÉE")}
                 </span>
               </h1>
               <p className="text-[11px] text-slate-400 font-mono">AP-C3MR™ Liquefaction Diagram • Arzew LNG Complex</p>
@@ -936,7 +936,7 @@ export default function SmartProcessFlow() {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
-              <PanelContent tag={selected} lang={lang} onPreviewDcs={(title, path) => setLightbox({ url: dcsUrl(path), title })} telemetry={telemetry} />
+              <PanelContent tag={selected} lang={lang} onPreviewDcs={(title, path) => setLightbox({ url: dcsUrl(path), title })} />
             </div>
           </div>
         )}
@@ -957,7 +957,7 @@ export default function SmartProcessFlow() {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
-              <PanelContent tag={selected} lang={lang} onPreviewDcs={(title, path) => setLightbox({ url: dcsUrl(path), title })} telemetry={telemetry} />
+              <PanelContent tag={selected} lang={lang} onPreviewDcs={(title, path) => setLightbox({ url: dcsUrl(path), title })} />
             </div>
           </div>
         )}
@@ -1054,7 +1054,7 @@ export default function SmartProcessFlow() {
   );
 }
 
-function PanelContent({ tag, lang, onPreviewDcs, telemetry }: { tag: TagDef; lang: string; onPreviewDcs: (title: string, path: string) => void; telemetry: any }) {
+function PanelContent({ tag, lang, onPreviewDcs }: { tag: TagDef; lang: string; onPreviewDcs: (title: string, path: string) => void }) {
   const L = (en: string, fr: string) => lang === "fr" ? fr : en;
   
   const filteredDcs = useMemo(() => DCS.filter(d => tag.dcsPanels.includes(d.id)), [tag.dcsPanels]);

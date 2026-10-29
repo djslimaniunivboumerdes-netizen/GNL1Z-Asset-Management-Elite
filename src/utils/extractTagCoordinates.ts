@@ -9,9 +9,10 @@ export interface OCRTag {
 export async function extractTagCoordinates(
   imageUrl: string
 ): Promise<OCRTag[]> {
-  const result = await Tesseract.recognize(imageUrl, "eng");
+  const result = await Tesseract.recognize(imageUrl, "eng", { blocks: true } as Record<string, unknown>);
+  const data = result.data as typeof result.data & { words?: Array<{ text: string; bbox: { x0: number; y0: number } }> };
 
-  return result.data.words
+  return (data.words ?? [])
     .filter(word => {
       const txt = word.text.trim();
       return /^\d{3}-[A-Z]\d+/.test(txt) ||

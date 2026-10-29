@@ -1,264 +1,58 @@
-import { useEffect, useState, useRef } from "react";
 import { Link } from "react-router-dom";
-import { CalendarClock, ChevronDown, ChevronUp, Clock, AlertTriangle, MoreVertical, Pencil, Trash2, CheckCircle, X } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { ArrowRight, CalendarClock, RefreshCw, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { supabase } from "@/integrations/supabase/client";
-import { toast } from "@/hooks/use-toast";
-import type { ScheduleItem, ScheduleStatus } from "@/types/alerts";
-import { buildSchedule } from "@/lib/alertEngine";
-import { differenceInDays, parseISO, format } from "date-fns";
 import { useI18n } from "@/contexts/I18nContext";
-
-interface ScheduleItemWithId extends ScheduleItem {
-  id?: string;
-}
+import { useSchedule } from "@/hooks/useSchedule";
+import { ScheduleStatusBadge } from "./ScheduleStatusBadge";
 
 export function TestScheduleWidget() {
-  const [items, setItems] = useState<ScheduleItemWithId[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [expanded, setExpanded] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editNextDue, setEditNextDue] = useState("");
-  const [menuOpen, setMenuOpen] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const { t, lang } = useI18n();
-
-  useEffect(() => {
-    loadSchedule();
-    function handleClickOutside(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(null);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  async function loadSchedule() {
-    setLoading(true);
-    try {
-      const schedule = await buildSchedule();
-      const filtered = schedule.filter((item) => item.status !== "OK");
-      setItems(filtered);
-    } catch (err) {
-      console.error("Failed to load schedule:", err);
-    }
-    setLoading(false);
-  }
-
-  function formatDate(dateStr: string | null): string {
-    if (!dateStr) return "—";
-    try {
-      return format(parseISO(dateStr), "yyyy-MM-dd");
-    } catch {
-      return dateStr;
-    }
-  }
-
-  function daysLeftText(days: number | null): string {
-    if (days === null) return "";
-    if (days < 0) return lang === "en" ? `(${Math.abs(days)}d overdue)` : `(${Math.abs(days)}j en retard)`;
-    return lang === "en" ? `(${days}d)` : `(${days}j)`;
-  }
-
-  async function deleteTest(id: string, tag: string) {
-    if (!confirm(lang === "en" ? `Delete test record for ${tag}?` : `Supprimer le dossier d'essai pour ${tag} ?`)) return;
-    const { error } = await supabase
-      .from("equipment_test_dates")
-      .delete()
-      .eq("id", id);
-    if (error) {
-      toast({ title: lang === "en" ? "Delete failed" : "Échec de suppression", description: error.message, variant: "destructive" });
-      return;
-    }
-    setItems((prev) => prev.filter((item) => item.id !== id));
-    toast({ title: lang === "en" ? "Test deleted" : "Essai supprimé" });
-    setMenuOpen(null);
-  }
-
-  async function closeTest(id: string) {
-    const { error } = await supabase
-      .from("equipment_test_dates")
-      .update({ next_test_due: null, status: "COMPLETED" })
-      .eq("id", id);
-    if (error) {
-      toast({ title: lang === "en" ? "Close failed" : "Échec de clôture", description: error.message, variant: "destructive" });
-      return;
-    }
-    setItems((prev) => prev.filter((item) => item.id !== id));
-    toast({ title: lang === "en" ? "Test marked as completed" : "Essai marqué comme terminé" });
-    setMenuOpen(null);
-  }
-
-  function startEdit(item: ScheduleItemWithId) {
-    setEditingId(item.id ?? null);
-    setEditNextDue(item.next_due ?? "");
-    setMenuOpen(null);
-  }
-
-  async function saveEdit(id: string) {
-    if (!editNextDue) return;
-    const { error } = await supabase
-      .from("equipment_test_dates")
-      .update({ next_test_due: editNextDue })
-      .eq("id", id);
-    if (error) {
-      toast({ title: lang === "en" ? "Update failed" : "Échec de mise à jour", description: error.message, variant: "destructive" });
-      return;
-    }
-    toast({ title: lang === "en" ? "Test updated" : "Essai mis à jour" });
-    setEditingId(null);
-    loadSchedule();
-  }
-
-  const statusConfig: Record<ScheduleStatus, { labelEn: string; labelFr: string; color: string; icon: typeof AlertTriangle }> = {
-    OVERDUE: { labelEn: "Overdue", labelFr: "En Retard", color: "bg-red-600", icon: AlertTriangle },
-    "DUE_SOON": { labelEn: "Due Soon", labelFr: "Bientôt Échu", color: "bg-amber-500", icon: Clock },
-    OK: { labelEn: "OK", labelFr: "OK", color: "bg-emerald-500", icon: Clock },
-  };
+  const { lang } = useI18n();
+  const { items, loading, errorMessage, isReference, refetch, isFetching } = useSchedule();
+  const L = (en: string, fr: string) => lang === "fr" ? fr : en;
+  const attention = items.filter((item) => item.status === "OVERDUE" || item.status === "DUE_SOON")
+    .sort((a, b) => (a.days_left ?? 0) - (b.days_left ?? 0));
+  const overdue = attention.filter((item) => item.status === "OVERDUE").length;
+  const unknown = items.filter((item) => item.status === "UNKNOWN").length;
 
   return (
-    <Card className="border-border bg-slate-900/50 backdrop-blur-sm shadow-xl rounded-2xl">
-      <CardHeader className="flex flex-row items-center justify-between pb-3 px-6 pt-6">
-        <div className="flex items-center gap-2">
-          <CalendarClock className="h-5 w-5 text-amber-500" />
-          <CardTitle className="text-lg font-display text-white">{t("testScheduleTitle")}</CardTitle>
-          {!loading && items.length > 0 && (
-            <Badge variant="secondary" className="text-xs bg-slate-800 text-slate-300 border border-slate-700">
-              {items.length} {lang === "en" ? "requiring attention" : "requièrent attention"}
-            </Badge>
-          )}
+    <section aria-labelledby="schedule-widget-title" className="flex min-w-0 flex-col rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm sm:p-6">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="rounded-lg bg-amber-500/10 p-2.5 text-amber-600 dark:text-amber-400"><CalendarClock className="h-5 w-5" /></span>
+          <div><h2 id="schedule-widget-title" className="font-display text-base font-semibold">{L("Maintenance outlook", "Suivi des essais")}</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">{L("Next 30 days", "30 prochains jours")}</p></div>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setExpanded((e) => !e)}
-          className="gap-1 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl"
-        >
-          {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-          {expanded ? (lang === "en" ? "Hide" : "Masquer") : (lang === "en" ? "Show" : "Afficher")}
+        <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" disabled={loading || isFetching} onClick={() => void refetch()} aria-label={L("Refresh schedule", "Actualiser le calendrier")}>
+          <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin motion-reduce:animate-none" : ""}`} />
         </Button>
-      </CardHeader>
+      </div>
 
-      <CardContent className="px-6 pb-6">
-        {loading ? (
-          <div className="text-center py-4 text-slate-400 text-sm font-mono">{t("loading")}</div>
-        ) : items.length === 0 ? (
-          <div className="text-center py-4 text-slate-400 text-sm font-mono bg-slate-950/50 border border-slate-800/80 rounded-xl p-6">
-            {lang === "en" ? "No overdue or upcoming tests. All equipment is up to date." : "Aucun essai en retard ou à venir. Tout l'équipement est à jour."}
+      {loading ? <div role="status" className="my-8 space-y-3"><div className="h-12 animate-pulse rounded-lg bg-muted" /><div className="h-12 animate-pulse rounded-lg bg-muted" /><span className="sr-only">{L("Loading schedule", "Chargement du calendrier")}</span></div>
+        : errorMessage ? <div role="alert" className="my-6 rounded-lg border border-amber-500/25 bg-amber-500/5 p-4">
+          <WifiOff className="mb-2 h-5 w-5 text-amber-600 dark:text-amber-400" />
+          <p className="text-sm font-medium">{L("Schedule unavailable", "Calendrier indisponible")}</p>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{L("We couldn't verify test dates. This does not mean equipment is up to date.", "Les dates n'ont pas pu être vérifiées. Cela ne signifie pas que les équipements sont à jour.")}</p>
+        </div>
+        : <>
+          <div className="my-5 grid grid-cols-2 gap-3">
+            <Link to="/test-schedule?status=OVERDUE" className="rounded-lg border border-border bg-background p-3 transition-colors hover:border-rose-500/50">
+              <span className="block text-2xl font-semibold tabular-nums text-rose-600 dark:text-rose-400">{overdue}</span><span className="text-xs text-muted-foreground">{L("Overdue tests", "Essais en retard")}</span>
+            </Link>
+            <Link to="/test-schedule?status=DUE_SOON" className="rounded-lg border border-border bg-background p-3 transition-colors hover:border-amber-500/50">
+              <span className="block text-2xl font-semibold tabular-nums text-amber-600 dark:text-amber-400">{attention.length - overdue}</span><span className="text-xs text-muted-foreground">{L("Due within 30 days", "Dus sous 30 jours")}</span>
+            </Link>
           </div>
-        ) : (
-          <div className="space-y-3">
-            <div className="flex gap-2 mb-3">
-              <Badge className="bg-red-600/20 border border-red-500/30 text-red-400 px-2.5 py-1 rounded-full font-mono text-xs">
-                {items.filter((i) => i.status === "OVERDUE").length} {lang === "en" ? "Overdue" : "En Retard"}
-              </Badge>
-              <Badge className="bg-amber-500/20 border border-amber-500/30 text-amber-400 px-2.5 py-1 rounded-full font-mono text-xs">
-                {items.filter((i) => i.status === "DUE_SOON").length} {lang === "en" ? "Due Soon" : "Bientôt Échu"}
-              </Badge>
-            </div>
-
-            {expanded && (
-              <div className="divide-y divide-slate-800 border border-slate-800 rounded-xl bg-slate-950/50 overflow-hidden">
-                {items.map((item) => {
-                  const cfg = statusConfig[item.status];
-                  const Icon = cfg.icon;
-                  const isEditing = editingId === item.id;
-
-                  return (
-                    <div
-                      key={item.id ?? item.tag}
-                      className="flex items-center justify-between p-4 hover:bg-slate-800/40 transition-colors relative"
-                    >
-                      <div className="flex items-center gap-4 min-w-0 flex-1">
-                        <Icon className={`h-5 w-5 shrink-0 ${item.status === "OVERDUE" ? "text-rose-500" : "text-amber-500"}`} />
-                        <div className="min-w-0">
-                          <div className="text-sm font-bold text-white truncate">{item.tag}</div>
-
-                          {isEditing ? (
-                            <div className="flex items-center gap-2 mt-2">
-                              <input
-                                type="date"
-                                value={editNextDue}
-                                onChange={(e) => setEditNextDue(e.target.value)}
-                                className="h-8 rounded-lg bg-slate-900 border border-slate-700 px-2 text-xs text-white"
-                              />
-                              <Button size="sm" className="h-8 text-xs bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg" onClick={() => item.id && saveEdit(item.id)}>{lang === "en" ? "Save" : "Enregistrer"}</Button>
-                              <Button size="sm" variant="ghost" className="h-8 text-xs text-slate-400 hover:text-white" onClick={() => setEditingId(null)}><X className="h-3 w-3" /></Button>
-                            </div>
-                          ) : (
-                            <div className="text-xs text-slate-400 font-mono mt-0.5">
-                              {lang === "en" ? "Next due:" : "Prochain essai :"} {formatDate(item.next_due)}
-                              {item.days_left !== null && (
-                                <span className={item.status === "OVERDUE" ? "text-rose-400 font-bold" : "text-amber-400 font-bold"}>
-                                  {" "}{daysLeftText(item.days_left)}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-3 shrink-0">
-                        <Badge className={`${item.status === "OVERDUE" ? "bg-rose-500/20 text-rose-300 border-rose-500/30" : "bg-amber-500/20 text-amber-300 border-amber-500/30"} border text-[10px] font-mono px-2 py-0.5 rounded-full`}>
-                          {lang === "en" ? cfg.labelEn : cfg.labelFr}
-                        </Badge>
-
-                        <div className="relative" ref={menuOpen === item.id ? menuRef : undefined}>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl"
-                            onClick={() => setMenuOpen(menuOpen === item.id ? null : item.id ?? null)}
-                          >
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
-
-                          {menuOpen === item.id && (
-                            <div className="absolute right-0 top-full mt-2 z-50 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1.5 min-w-[150px]">
-                              <button
-                                className="w-full text-left px-4 py-2 text-xs hover:bg-slate-800 flex items-center gap-2 text-slate-200 hover:text-white transition-colors"
-                                onClick={() => startEdit(item)}
-                              >
-                                <Pencil className="h-3.5 w-3.5 text-cyan-400" /> {lang === "en" ? "Edit" : "Modifier"}
-                              </button>
-                              <button
-                                className="w-full text-left px-4 py-2 text-xs hover:bg-slate-800 flex items-center gap-2 text-emerald-400 hover:text-emerald-300 transition-colors"
-                                onClick={() => item.id && closeTest(item.id)}
-                              >
-                                <CheckCircle className="h-3.5 w-3.5" /> {lang === "en" ? "Close" : "Clôturer"}
-                              </button>
-                              <div className="border-t border-slate-800 my-1" />
-                              <button
-                                className="w-full text-left px-4 py-2 text-xs hover:bg-rose-500/20 flex items-center gap-2 text-rose-400 hover:text-rose-300 transition-colors"
-                                onClick={() => item.id && deleteTest(item.id, item.tag)}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" /> {lang === "en" ? "Delete" : "Supprimer"}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {!expanded && items.length > 0 && (
-              <div className="text-xs text-slate-400 text-center py-2 font-mono">
-                {lang === "en" ? `Click "Show" to view ${items.length} items` : `Cliquez sur "Afficher" pour voir ${items.length} éléments`}
-              </div>
-            )}
-
-            <Button asChild variant="outline" size="sm" className="w-full mt-4 bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800 hover:text-white rounded-xl py-4 font-mono transition-all">
-              <Link to="/test-schedule">{lang === "en" ? "View Full Schedule →" : "Voir Tout le Calendrier →"}</Link>
-            </Button>
+          <div className="mb-5 space-y-1">
+            {attention.slice(0, 3).map((item) => <Link key={item.tag} to={`/equipment/${encodeURIComponent(item.tag)}`} className="flex items-center justify-between gap-2 rounded-lg px-2 py-2.5 hover:bg-muted">
+              <span className="truncate font-mono text-xs font-medium">{item.tag}</span><ScheduleStatusBadge status={item.status} />
+            </Link>)}
+            {!attention.length && <p className="py-3 text-sm text-muted-foreground">{L("No tests due in the next 30 days.", "Aucun essai prévu dans les 30 prochains jours.")}{unknown > 0 && ` ${unknown} ${L("items have no verified due date.", "éléments sans date vérifiée.")}`}</p>}
           </div>
-        )}
-      </CardContent>
-    </Card>
+          {isReference && <p className="mb-3 text-xs text-muted-foreground">{L("Local equipment register · not connected to live records", "Référentiel local · sans connexion aux dossiers en direct")}</p>}
+        </>}
+      <Button asChild variant="outline" className="mt-auto w-full justify-between rounded-lg">
+        <Link to="/test-schedule">{L("View full schedule", "Voir le calendrier complet")}<ArrowRight className="h-4 w-4" /></Link>
+      </Button>
+    </section>
   );
 }
