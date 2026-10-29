@@ -106,6 +106,7 @@ Response:
   "intent": "line_count",
   "verifiedLineList": false,
   "resolution": { "status": "resolved", "tags": [{ "input": "E-520", "tag": "E520" }] },
+  "providerFallback": true,
   "sources": [
     { "kind": "pid", "id": "x06-1", "title": "85-X06-10.1 — E520 R792 R793", "href": "/pids/E520 R792 R793.pdf" }
   ]
@@ -120,7 +121,7 @@ Limits and protections:
 - History ≤ 6 messages, each truncated to 1200 characters.
 - Line list ≤ 200 rows; manual evidence ≤ 5 manuals × 3 snippets × 500 characters.
 - Provider timeout 20 s; client timeout 25 s.
-- Provider failures return `503` instead of inventing an answer.
+- Provider failures are logged server-side and fall back to the bounded reference answer (`mode: "reference"` with `providerFallback: true`) instead of failing the chat; `503` is returned only if no reference answer exists.
 - Responses use `Cache-Control: no-store`.
 - Per-IP rate limit defaults to 20 requests/minute and returns `429` with `Retry-After`.
 

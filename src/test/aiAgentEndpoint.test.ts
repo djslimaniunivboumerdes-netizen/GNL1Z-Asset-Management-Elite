@@ -48,10 +48,17 @@ describe("bounded assistant endpoint", () => {
     const second = await onRequestPost({ request: request(body), env });
     expect((await second.json()).cached).toBe(true); expect(fetchMock).toHaveBeenCalledTimes(1);
   });
-  it("returns unavailable instead of inventing an answer when the provider fails", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("no", { status: 500 })));
+  it("falls back to the verified reference answer when the provider fails", async () => {
+    const fetchMock = vi.fn(async () => new Response("no", { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
     const response = await onRequestPost({ request: request({ prompt: "Review X01-E-501 provider failure", contextData: context }), env: { GEMINI_API_KEY: "test-key" } });
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(data.mode).toBe("reference");
+    expect(data.providerFallback).toBe(true);
+    expect(data.response).toContain("X01-E-501");
+    expect(data.response).toContain("AI narration is unavailable");
   });
   it("returns source cards for equipment, manuals, DCS panels, and simulated alarms", async () => {
     const richContext = {
@@ -125,10 +132,14 @@ describe("bounded assistant endpoint", () => {
     expect((await onRequestPost({ request: big, env: {} })).status).toBe(413);
     expect((await onRequestPost({ request: request({ prompt: "   " }), env: {} })).status).toBe(400);
   });
-  it("returns 503 when the provider returns an empty answer", async () => {
+  it("falls back to reference when the provider returns an empty answer", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "  " }] } }] }), { status: 200 })));
     const response = await onRequestPost({ request: request({ prompt: "Review X01-E-501 empty answer", contextData: context }), env: { GEMINI_API_KEY: "test-key" } });
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.mode).toBe("reference");
+    expect(data.providerFallback).toBe(true);
+    expect(data.response).toContain("X01-E-501");
   });
   it("returns a coverage gap, not an invented count, for E520 pipeline questions", async () => {
     const response = await onRequestPost({ request: request({ prompt: "How many pipelines associated with E-520?" }), env: {} });

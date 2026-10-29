@@ -201,7 +201,20 @@ Do not provide hydrotest setpoints, lift plans, sling/shackle selection, torque 
     if (!textAnswer) throw new Error("AI provider returned an empty response");
     remember(key, { expires: Date.now() + CACHE_TTL_MS, response: textAnswer, model, sources: answer.sources });
     return json(200, { response: textAnswer, model, cached: false, mode: "ai", sources: answer.sources, intent: answer.intent, verifiedLineList: answer.verifiedLineList, resolution: resolutionPayload }, origin);
-  } catch {
+  } catch (error) {
+    console.error("[expert-ai] provider failure:", error instanceof Error ? error.message : String(error));
+    const fallbackText = answer.text
+      ? `${answer.text}\n\n${lang === "fr"
+        ? "> La narration IA est indisponible pour le moment — réponse de référence vérifiée affichée ci-dessus."
+        : "> AI narration is unavailable right now — verified reference answer shown above."}`
+      : "";
+    if (fallbackText) {
+      return json(200, {
+        response: fallbackText, model: "static-reference", cached: false, mode: "reference",
+        sources: answer.sources, intent: answer.intent, verifiedLineList: answer.verifiedLineList,
+        resolution: resolutionPayload, providerFallback: true,
+      }, origin);
+    }
     return json(503, { error: "Assistant unavailable. No analysis was generated." }, origin);
   } finally {
     clearTimeout(timeout);
