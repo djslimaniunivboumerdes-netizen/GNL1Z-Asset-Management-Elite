@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "@/contexts/I18nContext";
 import News from "@/pages/News";
@@ -11,6 +11,44 @@ const renderNews = () => render(
 );
 
 const headings = () => screen.getAllByRole("heading", { level: 3 }).map(h => h.textContent);
+/** The live-feed status strip (scoped so the hero's freshness line can't collide). */
+const liveStatus = () => within(screen.getByTestId("live-status"));
+
+/** Default: no live feed reachable, so the page falls back to curated content. */
+const offline = async () => { throw new Error("network unavailable"); };
+
+function jsonResponse(payload: unknown) {
+  return { ok: true, status: 200, json: async () => payload };
+}
+
+const liveFeed = (items: unknown[], extra: Record<string, unknown> = {}) => ({
+  items,
+  generatedAt: new Date().toISOString(),
+  degraded: false,
+  sources: [{ name: "LNG market", ok: true, items: items.length }],
+  cached: false,
+  ...extra,
+});
+
+const liveItem = (id: string, title: string, dateISO: string) => ({
+  id: `https://news.example.test/${id}`,
+  title,
+  summary: "Live summary text for the headline.",
+  source: "Reuters",
+  link: `https://news.example.test/${id}`,
+  dateISO,
+  category: "Market",
+  live: true,
+});
+
+beforeEach(() => {
+  vi.stubGlobal("fetch", vi.fn(offline));
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  localStorage.clear();
+});
 
 describe("News page", () => {
   it("renders the hero, reference-snapshot disclaimer, and the full dispatch list", () => {
@@ -78,5 +116,79 @@ describe("News page", () => {
     await user.click(screen.getByRole("button", { name: /Sort: newest/i }));
     // Oldest: first grid item becomes the 2026-05-05 MCHE protocol dispatch.
     expect(headings()[1]).toMatch(/Warm-End Efficiency Protocol/);
+  });
+
+  it("shows the degraded notice when the live feed cannot be reached", async () => {
+    renderNews();
+    expect(await screen.findByTestId("live-status")).toHaveTextContent(/Live feed unavailable/i);
+    // Curated dispatches still render — the page never blanks out.
+    expect(screen.getByText(/18 industry dispatches/i)).toBeInTheDocument();
+    expect(headings()).toHaveLength(18);
+  });
+});
+
+describe("News page — live headlines", () => {
+  it("merges live headlines above the curated dispatches and leads with the freshest", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(liveFeed([
+      liveItem("a", "Sonatrach lifts Arzew LNG output to nameplate", "2026-10-30"),
+      liveItem("b", "European LNG storage refill slows on mild weather", "2026-10-29"),
+    ]))));
+    renderNews();
+
+    expect((await screen.findByTestId("live-status")).textContent).toMatch(/2 live headlines/i);
+    // 2 live + 18 curated, de-duplicated by headline.
+    await screen.findByRole("heading", { level: 3, name: /Sonatrach lifts Arzew LNG output/ });
+    expect(headings()).toHaveLength(20);
+    // The freshest live headline is the lead story…
+    expect(headings()[0]).toMatch(/Sonatrach lifts Arzew LNG output/);
+    // …and both live cards carry a Live badge plus a real outbound link.
+    expect(screen.getAllByText("Live")).toHaveLength(2);
+    expect(screen.getAllByRole("link", { name: /Sonatrach lifts Arzew LNG output/ })[0])
+      .toHaveAttribute("href", "https://news.example.test/a");
+  });
+
+  it("does not duplicate a curated dispatch when the live feed carries the same headline", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(liveFeed([
+      liveItem("c", "GNL1Z Digital Twin Deployment Complete — Full Process Simulation Online", "2026-10-30"),
+    ]))));
+    renderNews();
+
+    expect(await screen.findByTestId("live-status")).toHaveTextContent(/1 live headline/i);
+    // Same title as curated dispatch #1 → merged, not repeated.
+    expect(headings()).toHaveLength(18);
+  });
+
+  it("refreshes on demand", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(liveFeed([liveItem("d", "Spot LNG cargo tender closes firm", "2026-10-30")])));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderNews();
+
+    expect(await screen.findByTestId("live-status")).toHaveTextContent(/1 live headline/i);
+    const calls = fetchMock.mock.calls.length;
+    await user.click(screen.getByRole("button", { name: /Refresh live headlines/i }));
+    await screen.findByTestId("live-status");
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(calls);
+  });
+
+  it("flags a partially degraded feed while still showing what arrived", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(liveFeed(
+      [liveItem("e", "Algeria gas exports hold steady", "2026-10-30")],
+      { degraded: true, reason: "partial" },
+    ))));
+    renderNews();
+
+    expect(await screen.findByTestId("live-status")).toHaveTextContent(/1 live headline/i);
+    expect(screen.getByText(/some sources unreachable/i)).toBeInTheDocument();
+  });
+
+  it("keeps live headlines in French mode without inventing translations", async () => {
+    localStorage.setItem("gnl1z-lang", "fr");
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(liveFeed([liveItem("f", "Prix du GNL: le TTF recule", "2026-10-30")]))));
+    renderNews();
+
+    expect(await screen.findByTestId("live-status")).toHaveTextContent(/1 titre en direct/i);
+    expect(screen.getByRole("heading", { level: 3, name: /Prix du GNL: le TTF recule/ })).toBeInTheDocument();
+    expect(screen.getAllByText("Direct")).toHaveLength(1);
   });
 });
