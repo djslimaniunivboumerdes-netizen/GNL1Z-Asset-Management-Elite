@@ -5,8 +5,11 @@ import {
   Shield, Zap, RefreshCw, ChevronDown, ChevronUp,
 } from "lucide-react";
 
-const GITHUB_REPO = "djslimaniunivboumerdes-netizen/GNL1Z_Asset_Integrity_Management";
-const WEBAPP_URL  = "https://gnl1z.pages.dev";
+const GITHUB_REPO = "djslimaniunivboumerdes-netizen/GNL1Z-Asset-Management-Elite";
+// Stable app URL: VITE_APP_URL (Pages env var) or the origin we are served from.
+const WEBAPP_URL =
+  (import.meta.env.VITE_APP_URL as string | undefined)?.replace(/\/$/, "") ??
+  (typeof window !== "undefined" ? window.location.origin : "");
 const TESTFLIGHT  = "";
 // Checksums are fetched live from the release's SHA256SUMS.txt
 const APK_SHA256  = "";  // populated at runtime from release asset
