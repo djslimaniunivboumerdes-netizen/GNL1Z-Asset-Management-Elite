@@ -4,6 +4,7 @@
 // rebuilding the index (or an index entry pointing at a deleted file) fails CI
 // instead of quietly answering questions from stale data.
 
+import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -11,6 +12,10 @@ import { PID_INDEX } from "@/lib/pidIndex";
 
 const REPO_ROOT = process.cwd();
 const PIDS_DIR = path.join(REPO_ROOT, "public", "pids");
+
+function sha256(buffer: Buffer): string {
+  return createHash("sha256").update(buffer).digest("hex");
+}
 
 function drawingsOnDisk(): string[] {
   return readdirSync(PIDS_DIR)
@@ -45,16 +50,13 @@ describe("P&ID coverage — every shipped drawing is in the index", () => {
     }
   });
 
-  it("checksums still match the files that ship", () => {
-    // Catches a drawing replaced in place without re-running the extraction.
+  it("checksums match the files that ship", () => {
+    // The index was built from the drawings in this repository, not from a copy
+    // that later drifted (Drive vs local, or a re-export of the same sheet).
+    // Catches a drawing swapped in place without re-running the extraction.
     const drifted = PID_INDEX.sheets.filter((sheet) => {
-      const file = path.join(PIDS_DIR, path.basename(sheet.file));
-      const actual = readFileSync(file).length;
-      const expected = sheet.bytes;
-      // The index stores the size of the PDF read at extraction time; a
-      // re-export of the same drawing can legitimately differ by a few bytes,
-      // so only flag a change big enough to mean a different document.
-      return Math.abs(actual - expected) > 1024;
+      const buffer = readFileSync(path.join(PIDS_DIR, path.basename(sheet.file)));
+      return sha256(buffer) !== sheet.sha256;
     });
     expect(drifted.map((sheet) => sheet.file)).toEqual([]);
   });
