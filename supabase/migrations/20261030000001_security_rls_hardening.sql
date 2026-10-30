@@ -335,10 +335,52 @@ drop policy if exists "Public read ai_responses_cache" on public.ai_responses_ca
 drop policy if exists "Auth insert ai_responses_cache" on public.ai_responses_cache;
 drop policy if exists "Auth update ai_responses_cache" on public.ai_responses_cache;
 
--- news_cache is genuinely public data, but only the scheduled job writes it.
+-- news_cache holds public industry news, but the only reader is the Cloudflare
+-- Function (server-side), so no client role needs it at all. Grants are revoked
+-- from anon as well: RLS alone would be a single point of failure.
+drop policy if exists "Public read news_cache" on public.news_cache;
 drop policy if exists "Auth insert news_cache" on public.news_cache;
 drop policy if exists "Auth update news_cache" on public.news_cache;
-revoke insert, update, delete on public.news_cache from authenticated;
+revoke all on public.news_cache from anon, authenticated;
+
+-- Supabase grants every client role ALL privileges on new public tables by
+-- default. Revoking from anon as well as authenticated means RLS is the second
+-- line of defence, not the only one.
+revoke all on public.dcs_detected_instruments from anon;
+revoke all on public.rate_limit_counters from anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 8b. Client roles must not hold TRUNCATE, and anon must hold nothing at all
+-- ---------------------------------------------------------------------------
+-- TRUNCATE ignores row-level security, so leaving it granted means a single
+-- policy mistake becomes a bulk data-loss event rather than a leak of one row.
+-- Found by inspecting information_schema on staging after applying this file.
+do $$
+declare
+  t record;
+begin
+  for t in select tablename from pg_tables where schemaname = 'public' loop
+    execute format('revoke truncate on public.%I from anon, authenticated', t.tablename);
+    -- The only thing an unauthenticated visitor may do is read documents that
+    -- are explicitly classified PUBLIC.
+    if t.tablename <> 'engineering_documents' then
+      execute format('revoke all on public.%I from anon', t.tablename);
+    end if;
+  end loop;
+end $$;
+
+grant select on public.engineering_documents to anon;
+
+-- Align grants with policies, so no client role holds a privilege that no
+-- policy ever authorises:
+--   * maintenance history and notes are never deleted by a client;
+--   * the audit log is append-only (no UPDATE, no DELETE policy exists);
+--   * anon only ever reads documents classified PUBLIC.
+revoke insert, update, delete on public.engineering_documents from anon;
+revoke delete on public.engineering_documents from authenticated;
+revoke delete on public.maintenance_logs from authenticated;
+revoke delete on public.equipment_notes from authenticated;
+revoke update, delete on public.audit_log from authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 9. Append-only audit log

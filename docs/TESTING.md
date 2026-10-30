@@ -45,6 +45,13 @@ node scripts/audit-documents.mjs    # static document exposure report (read-only
 states.
 
 ### Guard tests (regression nets, not feature tests)
+### Staging (Supabase, `nwcpfsqsdjezkwkhxrqx`)
+The full migration set was applied in filename order and verified with the
+queries in `docs/DATABASE_MIGRATIONS.md`: RLS on 13/13 tables, no unintended
+blanket policies, 4 buckets with limits, the rate limiter, the maintenance
+lifecycle (legal transition accepted, two illegal transitions rejected) and the
+audit triggers. Results are tabulated in `docs/SECURITY.md`.
+
 | Guard | File |
 |---|---|
 | SQL migrations: RLS on every table, no blanket `USING (true)`/`WITH CHECK (true)`, roles defined, rollback documented | `migrations.test.ts` |
@@ -59,8 +66,9 @@ idempotent "drop then re-create" pattern in the hardening migrations reads as
 
 | Gap | Why | Consequence |
 |---|---|---|
-| RLS enforced by Postgres | Requires applying migrations to a project; not authorised | Policies are syntax-checked and unit-tested as text, not executed |
-| Storage policies | Same | Not exercised against a live bucket |
+| RLS as `anon`/`authenticated` at runtime | No users or JWTs were created on staging | Policies and privileges are verified; end-to-end authorization is not |
+| Storage policies | Buckets and policies were created on staging; no upload/download was performed | Upload, signed URL and owner-scoped paths are untested against a live bucket |
+| Document migration | This environment has no egress to `*.supabase.co` | 46 RESTRICTED files are still public; `scripts/upload-restricted-documents.mjs` is ready to run locally |
 | Edge Function behaviour | Requires a deployed function and secrets | Validation and sanitisation are unit-tested; HTTP/auth paths are not |
 | End-to-end (10-step spec flow) | No browser harness in the stack | Not automated; must be run manually against staging |
 | Offline/reconnect on a real device | Not automatable here | Covered by unit tests with fake-indexeddb only |

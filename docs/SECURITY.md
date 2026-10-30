@@ -1,8 +1,9 @@
 # GNL1Z — security assessment and remediation
 
-Verified 2026-10-30 against the repository at `0aa0cf5` and the Supabase
-project `gdkqetzkhgllwbpmqmux` (read-only queries and configuration review; no
-records were changed).
+Verified 2026-10-30 against the repository at `e85f5f7` and the Supabase
+projects `gdkqetzkhgllwbpmqmux` (configuration review, read-only queries) and
+`nwcpfsqsdjezkwkhxrqx` (restored as staging, migrations applied there). No live
+records were modified: staging is an empty restored project.
 
 Every item below is classified as one of:
 
@@ -143,9 +144,18 @@ migrations to the wrong database.
 - **C-02 · CSP allows `script-src 'self' 'unsafe-eval'`** and lists a dead
   `api.anthropic.com` origin in `connect-src`. `'unsafe-eval'` is required today
   by nothing that has been verified; removing it needs a staging run.
-- **C-03 · `disable_signup: false`, `password_min_length: 6`** in the Auth
-  configuration for a plant application. Recommend signup off (invite only) and
-  a longer minimum. **Requires authorisation to change.**
+- **C-03 · `disable_signup: false`, `password_min_length: 6`** — **partially
+  fixed on 2026-10-30 with authorisation.** Public sign-up is now **disabled**
+  (`disable_signup: true`) and the redirect allow-list was pruned from 16
+  entries to 8 (kept: the two production origins and their preview wildcards,
+  localhost dev ports, and the Arena preview host; removed: stale local port,
+  redundant `/auth/callback` entries and bare origins with no path).
+  **Consequence:** new Google sign-ins are also blocked — onboarding is now
+  invite-only (Dashboard → Authentication → Users → Invite), or re-enable with
+  `disable_signup: false`.
+  **Not changed:** `password_min_length` (still 6) and `password_hibp_enabled`
+  (false) are not exposed by the management connector — set them in the
+  dashboard under Authentication → Sign In / Providers → Email.
 - **C-04 · Storage buckets were created by hand.** Now declared in migrations,
   but the live project's existing bucket settings are reconciled only when the
   migration is applied.
@@ -166,6 +176,43 @@ migrations to the wrong database.
 - Cloudflare Functions are same-origin only and Drive IDs are allow-listed.
 
 ---
+
+## Verified on staging (2026-10-30)
+
+The migrations were applied to a restored staging project
+(`nwcpfsqsdjezkwkhxrqx`, PostgreSQL 17.6, restored for this purpose) and
+verified there. Production is untouched.
+
+| Check | Result |
+|---|---|
+| RLS enabled on every public table | **PASS** — 13/13 `relrowsecurity = true` |
+| Blanket `USING (true)` / `WITH CHECK (true)` policies | **PASS** — only two survive, both intended: `news_cache` public read and `profiles_update_admin` (gated by `is_admin()`) |
+| Buckets exist with size/MIME limits | **PASS** — 4 buckets: `equipment-photos` (private, 10 MB), `equipment-images` (public, 25 MB), `alert-photos` (private, 10 MB), `restricted-documents` (private, 60 MB) |
+| `consume_rate_limit()` | **PASS** — `true, true, false` at a limit of 2 per minute; null key rejected |
+| Maintenance lifecycle | **PASS** — `DRAFT → SUBMITTED` accepted; `SUBMITTED → APPROVED` and `SUBMITTED → CLOSED` rejected with no audit rows written |
+| Audit triggers | **PASS** — INSERT, the one legal UPDATE and DELETE each produced a row |
+| Client privileges | **PASS after fix** — see below |
+
+Two problems surfaced only by inspecting the live database, and both are now
+fixed in the migration:
+
+- **S-05 · `anon` and `authenticated` held `TRUNCATE` on every public table.**
+  TRUNCATE does not evaluate row-level security, so a policy mistake could have
+  destroyed a table wholesale. Revoked from both roles on all public tables.
+- **S-06 · `anon` held INSERT/UPDATE/DELETE on every application table.**
+  RLS blocked every one of them, but that made RLS the *only* control. `anon`
+  now holds a single privilege in the entire schema: SELECT on
+  `engineering_documents`, which exists for documents classified PUBLIC.
+
+Grants are now aligned with policies — no client role holds a privilege that no
+policy authorises.
+
+### Not verifiable on staging
+
+Runtime behaviour as `anon` and `authenticated` (JWT-scoped RLS) was **not**
+exercised: no users were created and no tokens were minted. Policies were
+verified as *definitions* and *privileges*, not end-to-end. That step needs the
+manual plan in `docs/TESTING.md`.
 
 ## Accepted risks
 
@@ -190,8 +237,14 @@ rotation is not strictly required. If you want the file out of history anyway:
 4. Rotate the anon key too if you want a clean break, and update it in
    Cloudflare Pages environment variables and every developer's local `.env`.
 
-Steps 2–4 touch production credentials and git history — **they are not done
-here and need your authorisation.**
+Steps 2–4 touch production credentials and git history. **You chose to leave
+history alone**, so nothing was purged and the anon key was not rotated.
+
+One related finding: the Supabase Management API returns the **Google OAuth
+client secret** in its configuration response. It was surfaced during this
+review and is treatable as exposed to anyone with an API token. Rotating it in
+Google Cloud Console (and pasting the new value into Authentication →
+Providers → Google) is recommended and needs your go-ahead.
 
 ## Document migration plan (R-01)
 
