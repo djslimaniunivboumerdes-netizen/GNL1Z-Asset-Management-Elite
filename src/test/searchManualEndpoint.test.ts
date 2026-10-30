@@ -155,6 +155,46 @@ describe("manual search full-text behaviour", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1); // served from the warm cache
   });
 
+  it("matches French accented text from an unaccented query and returns surface forms", async () => {
+    // MANUALS[5] — a document no other test caches, so this runs on fresh text.
+    const m = MANUALS[5];
+    const xml = "<w:p><w:t>La réfrigération au propane assure la liquéfaction du gaz.</w:t></w:p>";
+    const fetchMock = vi.fn(async () => new Response(docxZip(xml), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await onRequestPost({
+      request: request({ query: "refrigeration", manuals: [{ id: m.id, title: m.title_fr, driveId: m.drive_id }] }),
+      env: {},
+    });
+    const data = await response.json() as {
+      results: Array<{ id: string; snippets: string[]; terms: string[] }>;
+    };
+
+    expect(data.results).toHaveLength(1);
+    // Snippet is sliced from the original, so the accent is preserved…
+    expect(data.results[0].snippets[0]).toContain("réfrigération");
+    // …and the surface form is handed to the UI so highlighting is exact.
+    expect(data.results[0].terms).toContain("réfrigération");
+  });
+
+  it("prefers whole-token tag hits over digits buried in longer numbers", async () => {
+    const m = MANUALS[0];
+    // "15012" contains "501" but is not tag 501; only E-501 is a real hit.
+    const xml = "<w:p><w:t>Serial 15012 recorded near E-501 during the round.</w:t></w:p>";
+    const fetchMock = vi.fn(async () => new Response(docxZip(xml), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await onRequestPost({
+      request: request({ query: "501", manuals: [{ id: m.id, title: m.title_en, driveId: m.drive_id }] }),
+      env: {},
+    });
+    const data = await response.json() as { results: Array<{ count: number; snippets: string[] }> };
+
+    expect(data.results).toHaveLength(1);
+    expect(data.results[0].count).toBe(1); // not 2 — the 15012 noise is dropped
+    expect(data.results[0].snippets[0]).toContain("E-501");
+  });
+
   it("remembers failed downloads briefly instead of re-hitting Drive", async () => {
     const m = MANUALS[4];
     const fetchMock = vi.fn(async () => new Response("forbidden", { status: 403 }));

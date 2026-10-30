@@ -78,6 +78,81 @@ describe("Manuals page — operational manual section", () => {
     expect(screen.getByText(/1 of 1 documents matched · 0\.0s/)).toBeInTheDocument();
   });
 
+  it("remembers recent queries in localStorage and offers them for one-click re-run", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () => okJson({
+      results: [{
+        id: MANUALS[0].id,
+        title: MANUALS[0].title_en,
+        driveId: MANUALS[0].drive_id,
+        count: 1,
+        snippets: ["MEA circulation pump E-501 alignment check."],
+        terms: ["E-501"],
+      }],
+      meta: { total: MANUALS.length, matched: 1, failed: 0, cached: 0, elapsedMs: 4000 },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderManuals();
+
+    await user.click(screen.getByRole("button", { name: /search inside documents/i }));
+    await user.type(screen.getByRole("textbox"), "gaz");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await screen.findByText(/1 of 23 documents matched/);
+
+    // Persisted for the next visit…
+    expect(JSON.parse(localStorage.getItem("gnl1z-manual-searches") ?? "[]")).toEqual(["gaz"]);
+
+    // …and re-running it hits the endpoint again with the same term.
+    await user.click(screen.getByRole("button", { name: "gaz" }));
+    await screen.findByText(/1 of 23 documents matched/);
+    const second = (fetchMock.mock.calls[1] as unknown[])[1] as { body: string };
+    expect(JSON.parse(second.body).query).toBe("gaz");
+
+    await user.click(screen.getByRole("button", { name: /clear recent searches/i }));
+    expect(screen.queryByRole("button", { name: "gaz" })).toBeNull();
+    expect(localStorage.getItem("gnl1z-manual-searches")).toBe("[]");
+  });
+
+  it("copies the excerpts of a hit to the clipboard", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn(async (_value: string) => undefined);
+    vi.stubGlobal("fetch", vi.fn(async () => okJson({
+      results: [{
+        id: MANUALS[1].id,
+        title: MANUALS[1].title_en,
+        driveId: MANUALS[1].drive_id,
+        count: 1,
+        snippets: ["Dehydration bed switch-over every 8 hours."],
+        terms: ["bed"],
+      }],
+      meta: { total: MANUALS.length, matched: 1, failed: 0, cached: 0, elapsedMs: 800 },
+    })));
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    renderManuals();
+
+    await user.click(screen.getByRole("button", { name: /search inside documents/i }));
+    await user.type(screen.getByRole("textbox"), "bed");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await screen.findByText(/1 of 23 documents matched/);
+
+    await user.click(screen.getByRole("button", { name: `Copy excerpts from ${MANUALS[1].id}` }));
+    expect(writeText).toHaveBeenCalledTimes(1);
+    const copied = String(writeText.mock.calls[0]?.[0] ?? "");
+    expect(copied).toContain(MANUALS[1].id);
+    expect(copied).toContain("Dehydration bed switch-over every 8 hours.");
+    expect(await screen.findByText("Copied")).toBeInTheDocument();
+  });
+
+  it("clears the query on Escape", async () => {
+    const user = userEvent.setup();
+    renderManuals();
+    await user.click(screen.getByRole("button", { name: /search inside documents/i }));
+    const input = screen.getByRole("textbox");
+    await user.type(input, "propane");
+    await user.type(input, "{Escape}");
+    expect(input).toHaveValue("");
+  });
+
   it("offers a title-search fallback when full-text finds nothing", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async () => okJson({

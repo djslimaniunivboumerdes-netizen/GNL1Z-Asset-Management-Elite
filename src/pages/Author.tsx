@@ -3,6 +3,7 @@ import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/contexts/I18nContext";
 import { usePwaInstall, promptInstall } from "@/lib/pwaInstall";
+import { copyToClipboard } from "@/lib/clipboard";
 import { Link } from "react-router-dom";
 import { useState } from "react";
 import type { ReactNode } from "react";
@@ -55,25 +56,9 @@ export default function Author() {
   };
 
   const copy = async () => {
-    let ok = false;
-    try {
-      await navigator.clipboard.writeText(AUTHOR.email);
-      ok = true;
-    } catch {
-      // Fallback for non-secure contexts / missing clipboard permission.
-      try {
-        const ta = document.createElement("textarea");
-        ta.value = AUTHOR.email;
-        ta.style.position = "fixed";
-        ta.style.opacity = "0";
-        document.body.appendChild(ta);
-        ta.select();
-        ok = document.execCommand("copy");
-        document.body.removeChild(ta);
-      } catch {
-        ok = false;
-      }
-    }
+    // Shared helper: Clipboard API first, legacy textarea fallback when the
+    // permission is denied or the page is not a secure context.
+    const ok = await copyToClipboard(AUTHOR.email);
     if (ok) {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
