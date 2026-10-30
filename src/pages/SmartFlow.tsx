@@ -1,12 +1,18 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { Link } from "react-router-dom";
+import { useState, useRef, useCallback, useEffect, useMemo, memo } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useI18n } from "@/contexts/I18nContext";
 import { getCoordinate } from "@/utils/processFlowCoordinates";
+import { DCS_PANELS, dcsImageUrl } from "@/data/dcs_panels";
+import { MANUALS, driveDocViewUrl } from "@/data/manuals";
+import {
+  SECT, TAGS, INSTR, PFD_WIDTH, PFD_HEIGHT,
+  type Section, type TagDef,
+} from "@/data/smartFlow";
 import {
   ZoomIn, ZoomOut, RotateCcw, X, Search,
   Layers, ExternalLink, BookOpen, Menu, Zap,
   Activity, Gauge, Thermometer, Database, Cpu, AlertTriangle, CheckCircle2, Sliders,
-  Bell, BellRing, Sparkles, ShieldCheck
+  Bell, BellRing, Sparkles, ShieldCheck, Play, Pause
 } from "lucide-react";
 import {
   pushAlarm, acknowledgeAlarm, subscribeAlarms, getActiveAlarms,
@@ -16,360 +22,22 @@ import {
 /* ─── DEBUG MODE TOGGLE ─────────────────────────────────────────────────── */
 const DEBUG_COORDINATES = false;
 
-/* ─── Supabase storage ───────────────────────────────────────────────────── */
-const STORAGE_PROJECT = import.meta.env.VITE_SUPABASE_URL || "https://gdkqetzkhgllwbpmqmux.supabase.co";
-const SB = `${STORAGE_PROJECT}/storage/v1/object/public/equipment-images`;
-const dcsUrl = (p: string) =>
-  `${SB}/${p.split("/").map(encodeURIComponent).join("/")}`;
+/** Zoom level used when the view is centred on a tag (search, alarm jump, deep link). */
+const FOCUS_SCALE = 1.8;
 
-/* ─── Section theme ──────────────────────────────────────────────────────── */
-type Section =
-  | "treatment" | "dehydration" | "propane"
-  | "liquefaction" | "fractionation" | "compressor";
-
-const SECT: Record<Section, { en: string; fr: string; color: string; bg: string; border: string }> = {
-  treatment:    { en:"Treatment",    fr:"Traitement",    color:"#00e5a0", bg:"rgba(0,229,160,.16)",   border:"rgba(0,229,160,.5)"   },
-  dehydration:  { en:"Dehydration",  fr:"Déshydratation",color:"#38bdf8", bg:"rgba(56,189,248,.16)",  border:"rgba(56,189,248,.5)"  },
-  propane:      { en:"Propane",      fr:"Propane",       color:"#fb923c", bg:"rgba(251,146,60,.16)",  border:"rgba(251,146,60,.5)"  },
-  liquefaction: { en:"Liquefaction", fr:"Liquéfaction",  color:"#a78bfa", bg:"rgba(167,139,250,.16)", border:"rgba(167,139,250,.5)" },
-  fractionation:{ en:"Fractionation",fr:"Fractionnement",color:"#ffb020", bg:"rgba(255,176,32,.16)",  border:"rgba(255,176,32,.5)"  },
-  compressor:   { en:"Compression",  fr:"Compression",   color:"#ff4d6a", bg:"rgba(255,77,106,.16)",  border:"rgba(255,77,106,.5)"  },
-};
-
-/* ─── DCS panels ─────────────────────────────────────────────────────────── */
-const DCS = [
-  { id:"general-train",      title:"General Train",        path:"dcs/general train.jpg"                      },
-  { id:"decarbonation-01",   title:"Decarbonation MEA 1",  path:"dcs/decarbonation-01.jpg"                   },
-  { id:"decarbonation-2",    title:"Decarbonation MEA 2",  path:"dcs/decarbonation-2.jpg"                    },
-  { id:"dehydration-1",      title:"Dehydration 1",        path:"dcs/dehydration-1.jpg"                      },
-  { id:"dehydration-2",      title:"Dehydration 2",        path:"dcs/dehydration-2.jpg"                      },
-  { id:"dehydration-3",      title:"Dehydration 3",        path:"dcs/dehydration-3.jpg"                      },
-  { id:"scrubber",           title:"Inlet Scrubber",       path:"dcs/scrubber.jpg"                           },
-  { id:"propane-1",          title:"Propane Loop 1",       path:"dcs/propane-1.jpg"                          },
-  { id:"propane-2",          title:"Propane Loop 2",       path:"dcs/propane-2.jpg"                          },
-  { id:"propane-3",          title:"Propane Loop 3",       path:"dcs/propane-3.jpg"                          },
-  { id:"liquefaction-1",     title:"Liquefaction 1",       path:"dcs/liquefaction-1.jpg"                     },
-  { id:"liquefaction-2",     title:"Liquefaction 2",       path:"dcs/liquefaction-2.jpg"                     },
-  { id:"mcr-1",              title:"MCR Refrigeration 1",  path:"dcs/MCR-1.jpg"                              },
-  { id:"mcr-2",              title:"MCR Refrigeration 2",  path:"dcs/MCR-2.jpg"                              },
-  { id:"mcr-3",              title:"MCR Refrigeration 3",  path:"dcs/MCR-3.jpg"                              },
-  { id:"demethanisation",    title:"Demethaniser",         path:"dcs/demethanisation.jpg"                    },
-  { id:"demethanisation-2",  title:"Demethaniser 2",       path:"dcs/demethanisation-2.jpg"                  },
-  { id:"deethanisation",     title:"Deethaniser",          path:"dcs/deethanisation.jpg"                     },
-  { id:"depropanisation",    title:"Depropaniser",         path:"dcs/depropanisation.jpg"                    },
-  { id:"debutanisation",     title:"Debutaniser",          path:"dcs/debutanisation.jpg"                     },
-  { id:"echangeur-recup-gpl",title:"GPL Recovery Exch.",   path:"dcs/echangeur de recuperation gpl.jpg"      },
-  { id:"retour-condensat",   title:"Condensate Return",    path:"dcs/Retour Condensat train.jpg"             },
-  { id:"fuel-gas",           title:"Fuel Gas System",      path:"dcs/fuel gas sys.jpg"                       },
-];
-
-/* ─── Manuals ────────────────────────────────────────────────────────────── */
-const MANUALS = [
-  { id:"S01", title:"MEA — Decarbonation",  driveId:"103T3eROqirYc2Go3xE0vbcr6i_9cjSDi" },
-  { id:"S02", title:"Dehydration",           driveId:"19VBliziY8yD7_tM_81SbZIRe28kk7eNg"  },
-  { id:"S03", title:"Propane Refrigeration", driveId:"1g7KrNzjLyQM6Ijp29ISkv_uATUecADIN"  },
-  { id:"S04", title:"Feed Separation",       driveId:"1nBATg7dpHHiFOf3qNXR9ZOU6hUqSedEQ"  },
-  { id:"S05", title:"MCR Refrigeration",     driveId:"1sWLzexkdPf7w42D_GaPK7KY1CzhoemM8"  },
-  { id:"S06", title:"Liquefaction",          driveId:"1yxKUQGBv1yAO6wR4bftRwJU9L0aibCMh"  },
-  { id:"S07", title:"Demethanizer",          driveId:"1jY5d8TgWrXvAOaQXdS4D3IQmYB9Xe_N_"  },
-  { id:"S08", title:"Deethanizer",           driveId:"1mpQ-cEh2cqfegsWBU7oFN7Y8NurZoLRn"  },
-  { id:"S09", title:"Depropanizer",          driveId:"1uOjwdUaVrwG_TSfoa14GmZzrTs-jkYCI"  },
-  { id:"S10", title:"Debutaniser",           driveId:"1HdmaZ0YTR9Es9G-TT3Acby_L6R8Dr0MC"  },
-];
-
-/* ─── Instrument tags per DCS panel ─────────────────────────────────────── */
-const INSTR: Record<string, string[]> = {
-  "decarbonation-01": ["FIC101205","XV-101-223","LIC101204","TI101101","AI10138","TIC10125","LIC10121","PIC101215","TI101141","PIC10104","FI10105"],
-  "decarbonation-2":  ["TI101115","LIC101218","TI101108","LI10113","TI101106","PIC10107","FIC10078","LIC10119","XV-100-271","FIC10176"],
-  "dehydration-1":    ["101-F502","LIC10201","XV-102248","HV102172","TI102215","PDI10204A","TI102122","KV-102-13","KV-102-14","TI102762"],
-  "dehydration-2":    ["TI102215","KV-10223","TI102214","KV-10222","TIC102208","PI102217","FIC102219","LIC10239","HIC102221"],
-  "dehydration-3":    ["PI102149","PDI102153","PI102227","AAH102184","HIC102223","XV-102252","PDAH102229","PDALL102226"],
-  "scrubber":         ["TI104102","TI104109","TIC10442","PI10412","LIC10417","FIC10409","TIC10413","LIC10421","FIC10449"],
-  "propane-1":        ["TIC10304","FIC10301","XV-103-116","PIC103114A","TIC10313","TI103103","PI10307A","FIC10314"],
-  "propane-2":        ["PI10321A","PIC10400","TI104112","LV10424A","LIC10424","LIC10401","TI103106","FIC10428"],
-  "propane-3":        ["LV10435A","LIC10435","TI104104","TI104103","LV10440A","LIC10440","TI104113","ZI10442"],
-  "liquefaction-2":   ["TIC10612","TI106123","TIC10611","ZI10610","PIC10610","FI10616A","AI106164","LIC10605"],
-  "mcr-1":            ["FIC10505","FIC10503","FIC10504","SIC105231","PI105212","TI105101","TI105102","FIC10519","AI106164"],
-  "mcr-2":            ["PI105312","SIC105331","TI105103","FIC10529","TI105104","XV-105-127","TI104113"],
-  "mcr-3":            ["TI105102","PI105212","PI10515A","FIC10519","TI105101","HIC10519","FV-105-19"],
-  "demethanisation":  ["XV-107-113","TI107101","TI107102","TIC10705","TI107106","LIC10709","FIC10713","FIC10715"],
-  "deethanisation":   ["TI108106","PIC10802","TI108101","FIC10826","LIC10831","FIC10814","LIC10819","TIC10803"],
-  "depropanisation":  ["PIC10901","PIC10912","TI109106","LIC10914","FIC10910","TI109101","TIC10902","LIC10916"],
-  "debutanisation":   ["TI110106","PIC11009","FIC11000","TI110101","TIC11001","LIC11025","FIC11010","LIC11037"],
-};
-
-interface TagDef {
-  id: string; diag: string; x: number; y: number;
-  nameEn: string; nameFr: string;
-  section: Section; dbTag: string | null;
-  dcsPanels: string[]; manuals: string[];
-  descEn: string; specs: Record<string, string>;
+/** True when a key press belongs to a text field rather than to the diagram. */
+function isEditable(target: EventTarget | null): boolean {
+  const node = target as HTMLElement | null;
+  if (!node || !node.tagName) return false;
+  return node.tagName === "INPUT" || node.tagName === "TEXTAREA" || node.tagName === "SELECT" || node.isContentEditable;
 }
-
-const TAGS: TagDef[] = [
-  /* ── FEED TREATMENT ──────────────────────────────── */
-  {
-    id:"F502", diag:"101-F502", x:4.5, y:21.2,
-    nameEn:"MEA Absorber",          nameFr:"Absorbeur MEA",
-    section:"treatment", dbTag:"X01-F-502",
-    dcsPanels:["decarbonation-01","decarbonation-2","scrubber","general-train"],
-    manuals:["S01"],
-    descEn:"High-pressure MEA absorber — 55.8 m × 5.5 m. Removes CO₂ from feed gas to <50 ppmv (LNG grade). 81 bar, HIC carbon steel.",
-    specs:{ Pressure:"81 bar", Mass:"147 050 kg", Volume:"173 m³", Serial:"35960-6", Status:"DEROGATION" },
-  },
-  {
-    id:"F501", diag:"101-F501", x:11.3, y:32.3,
-    nameEn:"MEA Regenerator",       nameFr:"Régénérateur MEA",
-    section:"treatment", dbTag:"X01-F-501",
-    dcsPanels:["decarbonation-01","decarbonation-2","general-train"],
-    manuals:["S01"],
-    descEn:"Thermal stripping column where rich amine is heated by steam reboiler to break the MEA-CO₂ bond, releasing acid gas overhead.",
-    specs:{ Pressure:"8.4 bar", Mass:"22 950 kg", Volume:"27 m³", Serial:"35959-6" },
-  },
-  {
-    id:"E501", diag:"101-E501", x:10.5, y:7.3,
-    nameEn:"Overhead Condenser",    nameFr:"Condenseur de Tête",
-    section:"treatment", dbTag:"X01-E-501",
-    dcsPanels:["decarbonation-01"],
-    manuals:["S01"],
-    descEn:"Condenses overhead steam from the regenerator column to recover pure water for the amine loop while separating and venting gaseous CO₂.",
-    specs:{ Pressure:"8.6 bar", Mass:"600 kg" },
-  },
-  {
-    id:"E502", diag:"101-E502", x:13.5, y:46.4,
-    nameEn:"MEA Reboiler",          nameFr:"Rebouilleur de MEA",
-    section:"treatment", dbTag:"X01-E-502",
-    dcsPanels:["decarbonation-01","decarbonation-2"],
-    manuals:["S01"],
-    descEn:"Generates stripping steam and supplies thermal heat required to drive off CO₂ from rich amine solution in the regenerator column.",
-    specs:{ Pressure:"7.2 bar", Mass:"600 kg" },
-  },
-  {
-    id:"E503A", diag:"101-E503A", x:8.3, y:45.3,
-    nameEn:"MEA Lean/Rich Exch. A", nameFr:"Échangeur MEA Lean/Rich A",
-    section:"treatment", dbTag:"X01-E-503A",
-    dcsPanels:["decarbonation-01","decarbonation-2"],
-    manuals:["S01"],
-    descEn:"Cross-exchange heat recovery between hot lean amine leaving the regenerator and cool rich amine leaving the absorber.",
-    specs:{ Pressure:"8.6 bar", Mass:"600 kg" },
-  },
-  {
-    id:"E504", diag:"101-E504", x:4.5, y:6.2,
-    nameEn:"Feed Gas Pre-Heater",   nameFr:"Réchauffeur Gaz d'Alim.",
-    section:"treatment", dbTag:"X01-E-504",
-    dcsPanels:["decarbonation-01","scrubber"],
-    manuals:["S01"],
-    descEn:"Conditions the feed gas temperature to the optimal level before entering the amine contactor column.",
-    specs:{ Pressure:"15.5 bar", Mass:"600 kg" },
-  },
-  {
-    id:"G507", diag:"101-G507", x:7.8, y:12.3,
-    nameEn:"Amine Flash Drum",      nameFr:"Ballon de Flash MEA",
-    section:"treatment", dbTag:"X01-G-507",
-    dcsPanels:["decarbonation-01","general-train"],
-    manuals:["S01"],
-    descEn:"Separates condensed water from overhead acid gas vapor to provide pure reflux water back to the regenerator column.",
-    specs:{ Pressure:"7.8 bar", Mass:"300 kg", Serial:"V-2089-F" },
-  },
-  /* ── DEHYDRATION ─────────────────────────────────── */
-  {
-    id:"G0787", diag:"102-G07.87", x:21.2, y:20.5,
-    nameEn:"Feed Gas Inlet Scrubber", nameFr:"Ballon Séparateur d'Alim.",
-    section:"dehydration", dbTag:"X02-G-07.87",
-    dcsPanels:["dehydration-1","dehydration-2","scrubber"],
-    manuals:["S02"],
-    descEn:"Knockout drum equipped with mist eliminator pads to separate free water droplets and residual amine carryover before entering dehydration beds.",
-    specs:{ Mass:"400 kg", Status:"DEROGATION" },
-  },
-  {
-    id:"R0312", diag:"102-R03.12", x:27.5, y:22.3,
-    nameEn:"Mole Sieve / Mercury Bed", nameFr:"Sécheur Tamis / Démercurisation",
-    section:"dehydration", dbTag:"X02-R-03.12",
-    dcsPanels:["dehydration-1","dehydration-2","dehydration-3","general-train"],
-    manuals:["S02"],
-    descEn:"Fixed-bed adsorption column packed with 4A molecular sieves (removing water to <0.5 ppm) and sulfur-impregnated activated carbon (removing mercury to <0.01 µg/Nm³).",
-    specs:{ Mass:"8 000 kg", Status:"DEROGATION" },
-  },
-  {
-    id:"E0315", diag:"102-E03.15", x:33.1, y:43.2,
-    nameEn:"Regen Gas Cooler 1",    nameFr:"Refroidisseur Gaz Régén. 1",
-    section:"dehydration", dbTag:"X02-E-03.15",
-    dcsPanels:["dehydration-2","dehydration-3"],
-    manuals:["S02"],
-    descEn:"Cools hot regeneration gas leaving the molecular sieves during the desorption cycle to condense desorbed water vapor.",
-    specs:{ Mass:"600 kg", Status:"DEROGATION" },
-  },
-  {
-    id:"G0314", diag:"102-G03.14", x:27.6, y:43.2,
-    nameEn:"Regen Gas Separator",   nameFr:"Ballon Séparateur Régén.",
-    section:"dehydration", dbTag:"X02-G-03.14",
-    dcsPanels:["dehydration-2","dehydration-3"],
-    manuals:["S02"],
-    descEn:"Knockout drum that separates condensed water from regeneration gas before recycling the gas back to the main feed compressor suction.",
-    specs:{ Mass:"400 kg", Status:"DEROGATION" },
-  },
-  {
-    id:"G304", diag:"102-G304", x:33.8, y:18.2,
-    nameEn:"Dry Gas Buffer Drum",   nameFr:"Ballon Tampon Gaz Sec",
-    section:"dehydration", dbTag:"X02-G-304",
-    dcsPanels:["dehydration-1","scrubber"],
-    manuals:["S02"],
-    descEn:"Surge drum stabilizing pressure fluctuations between the dehydration section and the downstream propane chilling section.",
-    specs:{ Mass:"400 kg", Status:"DEROGATION" },
-  },
-  /* ── PROPANE CHILLING ────────────────────────────── */
-  {
-    id:"F0516", diag:"103-F05.16", x:59.5, y:30.8,
-    nameEn:"Propane Accumulator",   nameFr:"Accumulateur Propane",
-    section:"propane", dbTag:"X03-F-05.16",
-    dcsPanels:["propane-1","propane-2","propane-3","general-train"],
-    manuals:["S03"],
-    descEn:"Primary refrigerant storage vessel and stage-flashing economizer that supplies liquid propane to the kettle chillers and collects suction flash gas.",
-    specs:{ Mass:"15 000 kg", Status:"DEROGATION" },
-  },
-  {
-    id:"E0513", diag:"103-E05.13", x:59.5, y:13.2,
-    nameEn:"C3 Condenser 1",        nameFr:"Condenseur Propane 1",
-    section:"propane", dbTag:"X03-E-05.13",
-    dcsPanels:["propane-1","propane-2"],
-    manuals:["S03"],
-    descEn:"Desuperheats and condenses high-pressure propane vapor discharged from the C3 refrigeration compressor against cooling water.",
-    specs:{ Mass:"600 kg", Status:"DEROGATION" },
-  },
-  {
-    id:"E0514A", diag:"103-E05.14A", x:59.5, y:8.5,
-    nameEn:"C3 Condenser 2A",       nameFr:"Condenseur Propane 2A",
-    section:"propane", dbTag:"X03-E-05.14A",
-    dcsPanels:["propane-1","propane-2"],
-    manuals:["S03"],
-    descEn:"Operating in parallel with E-05.13 to handle the full massive propane refrigeration duty of the liquefaction train.",
-    specs:{ Mass:"600 kg", Status:"DEROGATION" },
-  },
-  {
-    id:"G0791", diag:"104-G07.91", x:51.8, y:66.7,
-    nameEn:"Propane LP Suction Drum", nameFr:"Ballon Aspiration BP Propane",
-    section:"propane", dbTag:"X04-G-07.91",
-    dcsPanels:["propane-3"],
-    manuals:["S03"],
-    descEn:"LP propane suction drum — protects LP compressor stage from liquid carry-over at the coldest propane level (~−35 °C).",
-    specs:{ Mass:"400 kg", Status:"DEROGATION" },
-  },
-  /* ── LIQUEFACTION / MCR ──────────────────────────── */
-  {
-    id:"E0520", diag:"106-E05.20", x:50.6, y:17.3,
-    nameEn:"Main Cryogenic Exch.",  nameFr:"Échangeur Cryogénique Princ.",
-    section:"liquefaction", dbTag:"X06-E-05.30",
-    dcsPanels:["liquefaction-1","liquefaction-2","mcr-1","mcr-2","mcr-3","general-train"],
-    manuals:["S05","S06"],
-    descEn:"MCHE — coil-wound cryogenic heat exchanger. Liquefies feed gas to −162 °C using mixed refrigerant (N₂/CH₄/C₂H₆/C₃H₈/C₄H₁₀). Core of the AP-C3MR™ process.",
-    specs:{ Status:"DEROGATION" },
-  },
-  {
-    id:"G0783", diag:"106-G07.83", x:65.7, y:15.2,
-    nameEn:"MCR HP Separator",      nameFr:"Séparateur MCR HP",
-    section:"liquefaction", dbTag:"X06-G-07.83",
-    dcsPanels:["mcr-1","mcr-2","liquefaction-1"],
-    manuals:["S05"],
-    descEn:"HP MCR separator — splits mixed refrigerant into light vapour (N₂/CH₄/C₂H₆) fed to MCHE warm bundle and heavy liquid (C₃/C₄) fed separately.",
-    specs:{ Mass:"400 kg", Status:"DEROGATION" },
-  },
-  {
-    id:"G0788", diag:"105-G07.88", x:77.8, y:43.1,
-    nameEn:"MCR LP Suction Drum",   nameFr:"Ballon Aspiration MCR BP",
-    section:"liquefaction", dbTag:"X05-G-07.88",
-    dcsPanels:["mcr-1","mcr-2"],
-    manuals:["S05"],
-    descEn:"MCR LP suction drum — separates mixed-refrigerant vapour returning from MCHE warm end before LP compressor stage.",
-    specs:{ Mass:"400 kg", Status:"DEROGATION" },
-  },
-  {
-    id:"G0789", diag:"K05-G07.89", x:87.2, y:49.0,
-    nameEn:"MCR HP Suction Drum",   nameFr:"Ballon Aspiration MCR HP",
-    section:"liquefaction", dbTag:"X05-G-07.89",
-    dcsPanels:["mcr-3"],
-    manuals:["S05"],
-    descEn:"MCR HP suction drum — final liquid/vapour separation before HP compressor stage. Ensures dry gas enters HP impellers.",
-    specs:{ Mass:"400 kg", Status:"DEROGATION" },
-  },
-  /* ── COMPRESSORS ─────────────────────────────────── */
-  {
-    id:"K110", diag:"103-K01.10", x:59.5, y:46.7,
-    nameEn:"Propane Compressor",    nameFr:"Compresseur Propane",
-    section:"compressor", dbTag:null,
-    dcsPanels:["propane-1","propane-2","propane-3"],
-    manuals:["S03"],
-    descEn:"4-stage centrifugal propane compressor driven by condensing steam turbine. Circulates propane refrigerant through HP/MP/LP chilling levels.",
-    specs:{},
-  },
-  {
-    id:"G0786", diag:"103-G07.86", x:78.7, y:55.0,
-    nameEn:"Propane LP Drum",       nameFr:"Ballon Propane BP",
-    section:"propane", dbTag:"X03-G-07.86",
-    dcsPanels:["propane-3"],
-    manuals:["S03"],
-    descEn:"Propane LP suction drum — lowest-pressure level of the propane refrigeration loop, feeds LP stage of compressor K01.10.",
-    specs:{ Mass:"400 kg", Status:"DEROGATION" },
-  },
-  {
-    id:"K120", diag:"105-K01.20", x:77.6, y:31.9,
-    nameEn:"MCR Compressor LP/MP",  nameFr:"Compresseur MCR BP/MP",
-    section:"compressor", dbTag:null,
-    dcsPanels:["mcr-1","mcr-2","mcr-3"],
-    manuals:["S05"],
-    descEn:"MCR centrifugal compressor LP/MP bodies driven by steam turbine — first two compression stages of the mixed-refrigerant loop, with intercooling.",
-    specs:{},
-  },
-  {
-    id:"K121", diag:"105-K01.21", x:87.2, y:29.2,
-    nameEn:"MCR Compressor HP",     nameFr:"Compresseur MCR HP",
-    section:"compressor", dbTag:null,
-    dcsPanels:["mcr-3"],
-    manuals:["S05"],
-    descEn:"MCR HP compressor body — final stage, discharges at ~44 bar. HP MCR passes through propane aftercooler before HP separator.",
-    specs:{},
-  },
-  /* ── FRACTIONATION ───────────────────────────────── */
-  {
-    id:"F0721", diag:"107-F07.21", x:10.2, y:69.4,
-    nameEn:"Demethaniser",          nameFr:"Déméthaniseur",
-    section:"fractionation", dbTag:"X07-F-07.21",
-    dcsPanels:["demethanisation","demethanisation-2","general-train"],
-    manuals:["S07"],
-    descEn:"Demethaniser — separates methane (LNG product) from C₂+ NGL. Overhead CH₄ recycles to liquefaction; bottoms feeds de-ethaniser.",
-    specs:{ Mass:"15 000 kg", Status:"DEROGATION" },
-  },
-  {
-    id:"F0731", diag:"108-F07.31", x:19.8, y:69.4,
-    nameEn:"De-ethaniser",          nameFr:"Dééthaniseur",
-    section:"fractionation", dbTag:"X08-F-07.31",
-    dcsPanels:["deethanisation"],
-    manuals:["S08"],
-    descEn:"De-ethaniser — separates ethane (C₂) from propane/butane/gasoline. Ethane overhead is exported or re-injected; bottoms feeds depropaniser.",
-    specs:{ Mass:"15 000 kg", Status:"DEROGATION" },
-  },
-  {
-    id:"F0741", diag:"109-F07.41", x:34.8, y:69.4,
-    nameEn:"Depropaniser",          nameFr:"Dépropaniseur",
-    section:"fractionation", dbTag:"X09-F-07.41",
-    dcsPanels:["depropanisation"],
-    manuals:["S09"],
-    descEn:"Depropaniser — separates propane (LPG) from butanes and natural gasoline. Propane overhead condensed and pumped to LPG storage.",
-    specs:{ Mass:"15 000 kg", Status:"DEROGATION" },
-  },
-  {
-    id:"F0751", diag:"110-F07.51", x:47.4, y:69.4,
-    nameEn:"Debutaniser",           nameFr:"Débutaniseur",
-    section:"fractionation", dbTag:"X10-F-07.51",
-    dcsPanels:["debutanisation"],
-    manuals:["S10"],
-    descEn:"Debutaniser — separates butane (C₄) from natural gasoline (C₅+). Butane overhead → LPG blending; gasoline bottoms → export.",
-    specs:{ Mass:"15 000 kg", Status:"DEROGATION" },
-  },
-];
 
 export default function SmartProcessFlow() {
   const { lang } = useI18n();
   const L = (en: string, fr: string) => lang === "fr" ? fr : en;
+  // ?tag=E501 — a supervisor can share a deep link straight to an asset.
+  const [params, setParams] = useSearchParams();
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const [selected,  setSelected]  = useState<TagDef | null>(null);
   const [filter,    setFilter]    = useState<Section | "all">("all");
@@ -383,30 +51,9 @@ export default function SmartProcessFlow() {
   const [dashOpen,  setDashOpen]  = useState(false);
   const [simLoad,   setSimLoad]   = useState(100); // Process load %
 
-  // Simulated Telemetry State
-  const [telemetry, setTelemetry] = useState({
-    feedFlow: 850,
-    powerMCR: 42.3,
-    powerC3: 28.5,
-    mcheTemp: -162.4,
-    c3Suction: 1.15,
-    efficiency: 97.8
-  });
-
-  // Simulated live telemetry generator
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setTelemetry(prev => ({
-        feedFlow: Math.round((850 * (simLoad / 100)) + (Math.random() * 10 - 5)),
-        powerMCR: Number(((42.3 * (simLoad / 100)) + (Math.random() * 0.6 - 0.3)).toFixed(1)),
-        powerC3: Number(((28.5 * (simLoad / 100)) + (Math.random() * 0.4 - 0.2)).toFixed(1)),
-        mcheTemp: Number((-162.4 + (Math.random() * 0.2 - 0.1)).toFixed(1)),
-        c3Suction: Number((1.15 + (Math.random() * 0.04 - 0.02)).toFixed(2)),
-        efficiency: Number((97.8 + (Math.random() * 0.4 - 0.2)).toFixed(1)),
-      }));
-    }, 2500);
-    return () => clearInterval(timer);
-  }, [simLoad]);
+  // Simulation master switch — freezes both the telemetry ticker and the
+  // alarm generator so a trainer can hold a steady picture while explaining.
+  const [simPaused, setSimPaused] = useState(false);
 
   // ── SIMULATED SAFETY ALARM ENGINE ─────────────────────────────────────────
   const [activeAlarms, setActiveAlarms] = useState<SimulatedAlarm[]>(getActiveAlarms());
@@ -436,6 +83,7 @@ export default function SmartProcessFlow() {
     ];
 
     const derogationTags = TAGS.filter(t => t.specs.Status === "DEROGATION");
+    if (simPaused) return;
 
     const timer = setInterval(() => {
       // Base probability scales with process load; DEROGATION assets are 2x more likely to fire.
@@ -471,7 +119,7 @@ export default function SmartProcessFlow() {
     }, 9000);
 
     return () => clearInterval(timer);
-  }, [simLoad]);
+  }, [simLoad, simPaused]);
 
   const dragStart  = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
   const wrapRef    = useRef<HTMLDivElement>(null);
@@ -518,8 +166,8 @@ export default function SmartProcessFlow() {
   }, [handleWheel]);
 
   const clampOffset = useCallback((newOffset: { x: number; y: number }) => {
-    const imgW = 1218;
-    const imgH = 934;
+    const imgW = PFD_WIDTH;
+    const imgH = PFD_HEIGHT;
     const containerW = viewportSize.w;
     const containerH = viewportSize.h;
     if (containerW === 0 || containerH === 0) return newOffset;
@@ -565,10 +213,18 @@ export default function SmartProcessFlow() {
 
   useEffect(() => {
     const fn = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { setSelected(null); setLightbox(null); }
-      if ((e.key === "+" || e.key === "=") && !e.ctrlKey) { e.preventDefault(); applyZoom(0.2); }
-      if (e.key === "-" && !e.ctrlKey) { e.preventDefault(); applyZoom(-0.2); }
-      if (e.key === "0") { e.preventDefault(); resetView(); }
+      // Escape works everywhere, including from inside the search field.
+      if (e.key === "Escape") { setSelected(null); setLightbox(null); return; }
+      // Never hijack browser/OS combinations…
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      // …and never steal a keystroke from the search box: the "0" shortcut used
+      // to swallow the zeros of "101-E501", making tags unsearchable.
+      if (isEditable(e.target)) return;
+
+      if (e.key === "+" || e.key === "=") { e.preventDefault(); applyZoom(0.2); }
+      if (e.key === "-") { e.preventDefault(); applyZoom(-0.2); }
+      if (e.key === "0" || e.key === "f") { e.preventDefault(); resetView(); }
+      if (e.key === "/") { e.preventDefault(); searchInputRef.current?.focus(); }
     };
     window.addEventListener("keydown", fn);
     return () => window.removeEventListener("keydown", fn);
@@ -598,6 +254,41 @@ export default function SmartProcessFlow() {
     return map;
   }, []);
 
+  /** Pan/zoom so a tag sits in the middle of the viewport — the missing half of
+   *  search: without it a match can be sitting off-screen with no way to reach it. */
+  const centerOn = useCallback((tag: TagDef) => {
+    const coord = coordMap.get(tag.id) ?? { x: tag.x, y: tag.y };
+    setScale(FOCUS_SCALE);
+    setOffset(clampOffset({
+      x: (50 - coord.x) / 100 * PFD_WIDTH * FOCUS_SCALE,
+      y: (50 - coord.y) / 100 * PFD_HEIGHT * FOCUS_SCALE,
+    }));
+  }, [clampOffset, coordMap]);
+
+  const selectTag = useCallback((tag: TagDef, options?: { center?: boolean }) => {
+    setSelected(tag);
+    if (options?.center) centerOn(tag);
+  }, [centerOn]);
+
+  // Deep link in: /flow?tag=E501 opens (and centres) that asset on load.
+  useEffect(() => {
+    const requested = params.get("tag");
+    if (!requested || selected) return;
+    const tag = TAGS.find(t => t.id.toLowerCase() === requested.toLowerCase()
+      || t.diag.toLowerCase() === requested.toLowerCase());
+    if (tag) selectTag(tag, { center: true });
+  }, [params, selected, selectTag]);
+
+  // Deep link out: keep the URL shareable as the operator moves around.
+  useEffect(() => {
+    const current = params.get("tag");
+    const wanted = selected?.id ?? null;
+    if (current === wanted) return;
+    const next = new URLSearchParams(params);
+    if (wanted) next.set("tag", wanted); else next.delete("tag");
+    setParams(next, { replace: true });
+  }, [selected, params, setParams]);
+
   const [dashSearch, setDashSearch] = useState("");
   const dashboardTags = useMemo(() => {
     if (!dashSearch.trim()) return TAGS;
@@ -613,10 +304,26 @@ export default function SmartProcessFlow() {
   const jumpToAlarmTag = (alarmTag: string) => {
     const tag = TAGS.find(t => t.id === alarmTag);
     if (tag) {
-      setSelected(tag);
+      // Select AND bring it into view — otherwise the drawer opens on an asset
+      // the operator still has to hunt for on a 1218 px diagram.
+      selectTag(tag, { center: true });
       setAlarmPanelOpen(false);
+      setDashOpen(false);
     }
   };
+
+  // Top-bar search results: the overlays alone are not enough feedback — a hit
+  // can be off-screen, so every match is also offered as a fly-to button.
+  const searchResults = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (q.length < 1) return [];
+    return TAGS.filter(t =>
+      t.diag.toLowerCase().includes(q) ||
+      t.id.toLowerCase().includes(q) ||
+      t.nameEn.toLowerCase().includes(q) ||
+      t.nameFr.toLowerCase().includes(q),
+    ).slice(0, 8);
+  }, [search]);
 
   const sevStyle = (sev: SimulatedAlarm["severity"]) =>
     sev === "P1"
@@ -659,32 +366,7 @@ export default function SmartProcessFlow() {
           </div>
         </div>
 
-        {/* Center: Live Simulated Telemetry Widgets */}
-        <div className="hidden lg:flex items-center gap-6 bg-slate-950/60 border border-slate-800/80 rounded-2xl px-6 py-2 shadow-inner font-mono text-xs">
-          <div className="flex items-center gap-2">
-            <Activity className="h-4 w-4 text-emerald-400 animate-pulse" />
-            <span className="text-slate-400">{L("Feed Flow:", "Alim:")}</span>
-            <span className="text-emerald-400 font-bold">{telemetry.feedFlow} MMSCFD</span>
-          </div>
-          <div className="w-px h-4 bg-slate-800"></div>
-          <div className="flex items-center gap-2">
-            <Gauge className="h-4 w-4 text-cyan-400" />
-            <span className="text-slate-400">{L("MCR Power:", "MCR Puiss:")}</span>
-            <span className="text-cyan-400 font-bold">{telemetry.powerMCR} MW</span>
-          </div>
-          <div className="w-px h-4 bg-slate-800"></div>
-          <div className="flex items-center gap-2">
-            <Gauge className="h-4 w-4 text-amber-400" />
-            <span className="text-slate-400">{L("C3 Power:", "C3 Puiss:")}</span>
-            <span className="text-amber-400 font-bold">{telemetry.powerC3} MW</span>
-          </div>
-          <div className="w-px h-4 bg-slate-800"></div>
-          <div className="flex items-center gap-2">
-            <Thermometer className="h-4 w-4 text-blue-400" />
-            <span className="text-slate-400">{L("MCHE Cold End:", "MCHE Extrémité:")}</span>
-            <span className="text-blue-400 font-bold">{telemetry.mcheTemp} °C</span>
-          </div>
-        </div>
+        <TelemetryBar simLoad={simLoad} paused={simPaused} lang={lang} />
 
         {/* Right Side: Simulation Ramping & Search */}
         <div className="flex items-center gap-4">
@@ -694,10 +376,25 @@ export default function SmartProcessFlow() {
               type="range"
               min="50" max="100" value={simLoad}
               onChange={e => setSimLoad(Number(e.target.value))}
+              aria-label={L("Process load percentage", "Pourcentage de charge procédé")}
               className="w-24 accent-cyan-500 cursor-pointer"
             />
             <span className="text-xs font-mono font-bold text-cyan-400">{simLoad}%</span>
           </div>
+          <div className="flex items-center gap-2">
+          </div>
+
+          <button
+            onClick={() => setSimPaused(p => !p)}
+            aria-pressed={simPaused}
+            title={L(simPaused ? "Resume simulation" : "Pause simulation", simPaused ? "Reprendre la simulation" : "Mettre la simulation en pause")}
+            className={`p-2.5 rounded-xl border transition-all flex items-center justify-center cursor-pointer ${
+              simPaused ? "bg-amber-500/15 border-amber-500/50 text-amber-400" : "bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-600"
+            }`}
+            aria-label={L(simPaused ? "Resume simulation" : "Pause simulation", simPaused ? "Reprendre la simulation" : "Mettre la simulation en pause")}
+          >
+            {simPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+          </button>
 
           {/* SAFETY ALARM BELL — SIMULATED SIS FEED */}
           <button
@@ -709,6 +406,11 @@ export default function SmartProcessFlow() {
             }`}
             aria-label={L("Active Alarms", "Alarmes Actives")}
           >
+            <span className="sr-only" role="status">
+              {activeAlarms.length === 0
+                ? L("No active alarms", "Aucune alarme active")
+                : L(`${activeAlarms.length} active alarms`, `${activeAlarms.length} alarmes actives`)}
+            </span>
             {activeAlarms.length > 0 ? <BellRing className="h-4 w-4 animate-pulse" /> : <Bell className="h-4 w-4" />}
             {activeAlarms.length > 0 && (
               <span className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-rose-600 text-[10px] font-mono font-bold text-white border border-slate-900 shadow-md">
@@ -719,17 +421,46 @@ export default function SmartProcessFlow() {
 
           <div className="relative w-48 md:w-60">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-            <input 
+            <input
+              ref={searchInputRef}
               type="text"
               value={search}
               onChange={e => setSearch(e.target.value)}
+              aria-label={L("Search equipment tags", "Rechercher des repères")}
               placeholder={L("Search tags, names...", "Rechercher repères...")}
               className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-8 py-2 text-xs text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none transition-colors font-mono"
             />
             {search && (
-              <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white">
+              <button onClick={() => setSearch("")} aria-label={L("Clear search", "Effacer la recherche")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white">
                 <X className="h-3.5 w-3.5" />
               </button>
+            )}
+
+            {/* Fly-to results: a match on a 1218 px diagram is useless if the
+                operator has to pan around to find the highlighted overlay. */}
+            {search.trim().length > 0 && (
+              <div className="absolute top-full mt-2 right-0 w-72 bg-slate-900/95 border border-slate-800 backdrop-blur-xl rounded-xl shadow-2xl overflow-hidden z-50">
+                {searchResults.length === 0 ? (
+                  <p className="px-4 py-3 text-[11px] font-mono text-slate-500">
+                    {L("No equipment matches this search.", "Aucun équipement ne correspond.")}
+                  </p>
+                ) : (
+                  <ul className="max-h-64 overflow-y-auto">
+                    {searchResults.map(t => (
+                      <li key={t.id}>
+                        <button
+                          type="button"
+                          onClick={() => { selectTag(t, { center: true }); setSearch(""); }}
+                          className="w-full flex items-center justify-between gap-3 px-4 py-2.5 text-left hover:bg-slate-800/70 transition-colors"
+                        >
+                          <span className="font-mono text-[11px] font-bold" style={{ color: SECT[t.section].color }}>{t.diag}</span>
+                          <span className="text-[11px] text-slate-300 truncate">{L(t.nameEn, t.nameFr)}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -801,7 +532,7 @@ export default function SmartProcessFlow() {
             const bord   = s === "all" ? "rgba(255,255,255,0.2)" : SECT[s as Section].border;
             const lbl    = s === "all" ? L("ALL UNITS", "TOUTES UNITÉS") : L(SECT[s as Section].en, SECT[s as Section].fr);
             return (
-              <button key={s} onClick={() => setFilter(s)}
+              <button key={s} onClick={() => setFilter(s)} aria-pressed={active}
                 style={{
                   border: `1px solid ${active ? bord : "rgba(255,255,255,0.1)"}`,
                   background: active ? bg : "transparent",
@@ -853,7 +584,10 @@ export default function SmartProcessFlow() {
             placeItems: "center"
           }}>
             
-            <div className="relative w-full max-w-[1218px] aspect-[1218/934] shadow-[0_0_80px_rgba(0,0,0,0.8)] border border-slate-800/80 rounded-3xl overflow-hidden bg-slate-900/40 backdrop-blur-sm">
+            <div
+              className="relative w-full aspect-[1218/934] shadow-[0_0_80px_rgba(0,0,0,0.8)] border border-slate-800/80 rounded-3xl overflow-hidden bg-slate-900/40 backdrop-blur-sm"
+              style={{ maxWidth: PFD_WIDTH }}
+            >
               <img
                 src="/pfd/gnl1z-pfd-labeled.png"
                 alt="GNL1Z Labeled Process Flow Diagram"
@@ -893,6 +627,7 @@ export default function SmartProcessFlow() {
                         e.stopPropagation();
                         setSelected(isActive ? null : t);
                       }}
+                      aria-pressed={isActive}
                       aria-label={t.diag + ' – ' + L(t.nameEn, t.nameFr)}
                       style={{
                         border: `1px solid ${isActive || isHov ? c.border : "rgba(0,200,255,0.3)"}`,
@@ -915,7 +650,7 @@ export default function SmartProcessFlow() {
 
         {/* DESKTOP EQUIPMENT INSPECTION DRAWER */}
         {!isMobile && selected && sc && (
-          <div className="w-[420px] bg-slate-900/90 border-l border-slate-800 backdrop-blur-2xl flex flex-col z-30 shadow-2xl animate-in slide-in-from-right duration-200">
+          <div data-testid="inspection-drawer" className="w-[420px] bg-slate-900/90 border-l border-slate-800 backdrop-blur-2xl flex flex-col z-30 shadow-2xl animate-in slide-in-from-right duration-200">
             <div className="p-6 border-b border-slate-800 flex justify-between items-start bg-slate-950/40">
               <div>
                 <div className="flex items-center gap-2 mb-2">
@@ -936,7 +671,7 @@ export default function SmartProcessFlow() {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
-              <PanelContent tag={selected} lang={lang} onPreviewDcs={(title, path) => setLightbox({ url: dcsUrl(path), title })} />
+              <PanelContent tag={selected} lang={lang} onPreviewDcs={(title, url) => setLightbox({ url, title })} />
             </div>
           </div>
         )}
@@ -957,7 +692,7 @@ export default function SmartProcessFlow() {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
-              <PanelContent tag={selected} lang={lang} onPreviewDcs={(title, path) => setLightbox({ url: dcsUrl(path), title })} />
+              <PanelContent tag={selected} lang={lang} onPreviewDcs={(title, url) => setLightbox({ url, title })} />
             </div>
           </div>
         )}
@@ -965,7 +700,7 @@ export default function SmartProcessFlow() {
 
       {/* DASHBOARD EQUIPMENT DRAWER */}
       {dashOpen && (
-        <div className={`absolute top-0 left-0 bottom-0 ${isMobile ? "w-full" : "w-[360px]"} bg-slate-900/95 border-r border-slate-800 backdrop-blur-2xl z-50 flex flex-col shadow-2xl animate-in slide-in-from-left duration-200`}>
+        <div data-testid="equipment-dashboard" className={`absolute top-0 left-0 bottom-0 ${isMobile ? "w-full" : "w-[360px]"} bg-slate-900/95 border-r border-slate-800 backdrop-blur-2xl z-50 flex flex-col shadow-2xl animate-in slide-in-from-left duration-200`}>
           <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-950/40">
             <div className="flex items-center gap-2.5">
               <div className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
@@ -1009,7 +744,7 @@ export default function SmartProcessFlow() {
                       return (
                         <button
                           key={t.id}
-                          onClick={() => { setSelected(t); setDashOpen(false); }}
+                          onClick={() => { selectTag(t, { center: true }); setDashOpen(false); }}
                           className={`w-full flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer ${
                             isSelected ? "bg-cyan-500/10 border-cyan-500/30 text-cyan-400 shadow-inner" : "bg-slate-950/40 border-slate-800/80 text-slate-300 hover:border-slate-700 hover:text-white"
                           }`}
@@ -1054,11 +789,72 @@ export default function SmartProcessFlow() {
   );
 }
 
-function PanelContent({ tag, lang, onPreviewDcs }: { tag: TagDef; lang: string; onPreviewDcs: (title: string, path: string) => void }) {
+/** Baseline plant values the simulator jitters around at 100 % load. */
+const TELEMETRY_BASE = { feedFlow: 850, powerMCR: 42.3, powerC3: 28.5, mcheTemp: -162.4, c3Suction: 1.15, efficiency: 97.8 };
+
+const TelemetryBar = memo(function TelemetryBar({ simLoad, paused, lang }: { simLoad: number; paused: boolean; lang: "en" | "fr" }) {
   const L = (en: string, fr: string) => lang === "fr" ? fr : en;
-  
-  const filteredDcs = useMemo(() => DCS.filter(d => tag.dcsPanels.includes(d.id)), [tag.dcsPanels]);
-  const filteredManuals = useMemo(() => MANUALS.filter(m => tag.manuals.includes(m.id)), [tag.manuals]);
+  const [values, setValues] = useState(TELEMETRY_BASE);
+
+  useEffect(() => {
+    if (paused) return;
+    const jitter = (base: number, spread: number, decimals: number) =>
+      Number(((base * (simLoad / 100)) + (Math.random() * spread - spread / 2)).toFixed(decimals));
+    const tick = () => setValues({
+      feedFlow: Math.round((TELEMETRY_BASE.feedFlow * (simLoad / 100)) + (Math.random() * 10 - 5)),
+      powerMCR: jitter(TELEMETRY_BASE.powerMCR, 0.6, 1),
+      powerC3: jitter(TELEMETRY_BASE.powerC3, 0.4, 1),
+      mcheTemp: Number((TELEMETRY_BASE.mcheTemp + (Math.random() * 0.2 - 0.1)).toFixed(1)),
+      c3Suction: jitter(TELEMETRY_BASE.c3Suction, 0.04, 2),
+      efficiency: jitter(TELEMETRY_BASE.efficiency, 0.4, 1),
+    });
+    tick();
+    const timer = setInterval(tick, 2500);
+    return () => clearInterval(timer);
+  }, [simLoad, paused]);
+
+  return (
+    <div className="hidden lg:flex items-center gap-6 bg-slate-950/60 border border-slate-800/80 rounded-2xl px-6 py-2 shadow-inner font-mono text-xs">
+      <div className="flex items-center gap-2">
+        <Activity className={`h-4 w-4 text-emerald-400 ${paused ? "" : "animate-pulse"}`} />
+        <span className="text-slate-400">{L("Feed Flow:", "Alim:")}</span>
+        <span className="text-emerald-400 font-bold">{values.feedFlow} MMSCFD</span>
+      </div>
+      <div className="w-px h-4 bg-slate-800" />
+      <div className="flex items-center gap-2">
+        <Gauge className="h-4 w-4 text-cyan-400" />
+        <span className="text-slate-400">{L("MCR Power:", "MCR Puiss:")}</span>
+        <span className="text-cyan-400 font-bold">{values.powerMCR} MW</span>
+      </div>
+      <div className="w-px h-4 bg-slate-800" />
+      <div className="flex items-center gap-2">
+        <Gauge className="h-4 w-4 text-amber-400" />
+        <span className="text-slate-400">{L("C3 Power:", "C3 Puiss:")}</span>
+        <span className="text-amber-400 font-bold">{values.powerC3} MW</span>
+      </div>
+      <div className="w-px h-4 bg-slate-800" />
+      <div className="flex items-center gap-2">
+        <Thermometer className="h-4 w-4 text-blue-400" />
+        <span className="text-slate-400">{L("MCHE Cold End:", "MCHE Extrémité:")}</span>
+        <span className="text-blue-400 font-bold">{values.mcheTemp} °C</span>
+      </div>
+    </div>
+  );
+});
+
+function PanelContent({ tag, lang, onPreviewDcs }: { tag: TagDef; lang: "en" | "fr"; onPreviewDcs: (title: string, url: string) => void }) {
+  const L = (en: string, fr: string) => lang === "fr" ? fr : en;
+
+  // Resolved from the shared catalogues (src/data/dcs_panels, src/data/manuals)
+  // so a renamed panel or a rotated drive link is fixed in exactly one place.
+  const filteredDcs = useMemo(
+    () => DCS_PANELS.filter(d => tag.dcsPanels.includes(d.id)),
+    [tag.dcsPanels],
+  );
+  const filteredManuals = useMemo(
+    () => MANUALS.filter(m => tag.manuals.includes(m.id)),
+    [tag.manuals],
+  );
   const linkedInstruments = useMemo(() => {
     return [...new Set(tag.dcsPanels.flatMap(pid => INSTR[pid] ?? []))].slice(0, 24);
   }, [tag.dcsPanels]);
@@ -1137,10 +933,10 @@ function PanelContent({ tag, lang, onPreviewDcs }: { tag: TagDef; lang: string; 
             {filteredDcs.map(d => (
               <button
                 key={d.id}
-                onClick={() => onPreviewDcs(d.title, d.path)}
+                onClick={() => onPreviewDcs(L(d.title_en, d.title_fr), dcsImageUrl(d.storage_path))}
                 className="w-full p-3.5 rounded-xl bg-slate-900 border border-slate-800 text-cyan-400 hover:border-cyan-500/50 hover:bg-slate-800/80 transition-all flex items-center justify-between cursor-pointer group shadow-sm"
               >
-                <span className="font-mono font-bold text-xs truncate mr-4 group-hover:text-white transition-colors">{d.title}</span>
+                <span className="font-mono font-bold text-xs truncate mr-4 group-hover:text-white transition-colors">{L(d.title_en, d.title_fr)}</span>
                 <ExternalLink className="h-4 w-4 text-cyan-500 transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform shrink-0" />
               </button>
             ))}
@@ -1174,13 +970,13 @@ function PanelContent({ tag, lang, onPreviewDcs }: { tag: TagDef; lang: string; 
             {filteredManuals.map(m => (
               <a
                 key={m.id}
-                href={`https://drive.google.com/file/d/${m.driveId}/view`}
+                href={driveDocViewUrl(m.drive_id)}
                 target="_blank" rel="noopener noreferrer"
                 className="w-full p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 hover:border-amber-500/60 hover:bg-amber-500/20 transition-all flex items-center justify-between cursor-pointer group shadow-sm text-xs font-mono font-bold"
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <BookOpen className="h-4 w-4 text-amber-500 shrink-0" />
-                  <span className="truncate group-hover:text-white transition-colors">{m.title}</span>
+                  <span className="truncate group-hover:text-white transition-colors">{L(m.title_en, m.title_fr)}</span>
                 </div>
                 <ExternalLink className="h-4 w-4 text-amber-500 transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform shrink-0" />
               </a>
