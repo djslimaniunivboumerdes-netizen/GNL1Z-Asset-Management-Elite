@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   Gauge, Search, X, Cpu, Database, GitBranch, Filter, ArrowUpRight,
-  CircleDot, Layers, AlertTriangle, BookOpen,
+  CircleDot, Layers, AlertTriangle, BookOpen, FileText, MapPin,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,8 @@ import {
   type InstrumentEntry,
 } from "@/lib/instrumentIndex";
 import { describeInstrument, instrumentUnit } from "@/lib/instrumentTags";
+import { instrumentContext, unitOfInstrument } from "@/lib/instrumentLocation";
+import InstrumentLocator from "@/components/InstrumentLocator";
 
 const L = (lang: "en" | "fr", en: string, fr: string) => (lang === "fr" ? fr : en);
 
@@ -35,9 +37,18 @@ const CLASS_STYLE: Record<string, string> = {
   unknown: "border-border text-muted-foreground bg-muted/30",
 };
 
-function InstrumentCard({ entry, lang }: { entry: InstrumentEntry; lang: "en" | "fr" }) {
+function InstrumentCard({
+  entry,
+  lang,
+  onLocate,
+}: {
+  entry: InstrumentEntry;
+  lang: "en" | "fr";
+  onLocate: (entry: InstrumentEntry) => void;
+}) {
   const { parsed, unit, panels, equipment } = entry;
   const eu = instrumentUnit(parsed);
+  const drawings = instrumentContext(entry, lang).placements;
 
   return (
     <article
@@ -86,7 +97,52 @@ function InstrumentCard({ entry, lang }: { entry: InstrumentEntry; lang: "en" | 
             {L(lang, "Loop", "Boucle")} {parsed.loop}
           </span>
         )}
+        <button
+          type="button"
+          onClick={() => onLocate(entry)}
+          data-testid="locate-instrument"
+          className="inline-flex items-center gap-1 border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/10 rounded-md px-2 py-1 transition-colors"
+        >
+          <MapPin className="h-3 w-3" />
+          {L(lang, "Locate", "Localiser")}
+        </button>
       </div>
+
+      {/* Where it is on the drawings */}
+      {drawings.length > 0 ? (
+        <div className="space-y-1.5" data-testid="instrument-drawings">
+          <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+            <FileText className="h-3 w-3" />
+            {L(lang, "On the drawings", "Sur les plans")}
+            <span className="text-amber-500/80 normal-case tracking-normal">
+              · {L(lang, "unit-level, not verified", "niveau unité, non vérifié")}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {drawings.slice(0, 3).map((placement) => (
+              <Link
+                key={placement.file}
+                to={placement.url}
+                title={placement.title}
+                className="inline-flex items-center gap-1 text-[11px] font-mono border border-border text-foreground/80 hover:border-cyan-500/40 hover:text-cyan-400 rounded-md px-2 py-1 transition-colors"
+              >
+                {placement.drawing ?? placement.title}
+                <ArrowUpRight className="h-3 w-3" />
+              </Link>
+            ))}
+            {drawings.length > 3 && (
+              <span className="text-[11px] font-mono text-muted-foreground self-center">
+                +{drawings.length - 3} {L(lang, "more of this unit", "de plus dans cette unité")}
+              </span>
+            )}
+          </div>
+        </div>
+      ) : (
+        <p className="text-[11px] font-mono text-amber-500/80 flex items-center gap-1.5" data-testid="instrument-no-drawing">
+          <AlertTriangle className="h-3 w-3" />
+          {L(lang, "No drawing could be tied to this tag.", "Aucun plan n'a pu être relié à ce tag.")}
+        </p>
+      )}
 
       {/* Which DCS screens show it */}
       {panels.length > 0 && (
@@ -158,16 +214,35 @@ export default function Instruments() {
   const [q, setQ] = useState(() => params.get("q") ?? "");
   const [variable, setVariable] = useState<string | null>(null);
   const [deviceClass, setDeviceClass] = useState<string | null>(null);
-  const [unitCode, setUnitCode] = useState<string | null>(null);
+  // ?unit=06 lets a P&ID drawing open the finder on every instrument of that
+  // unit. A drawing only knows its unit (06), not its train, so a two-digit
+  // filter keeps every train of that unit — 106, 206, 306, 506, 606.
+  const [unitFilter, setUnitFilter] = useState<string | null>(() => params.get("unit"));
+  const [onDrawing, setOnDrawing] = useState(false);
+  const [located, setLocated] = useState<InstrumentEntry | null>(null);
   const [showHelp, setShowHelp] = useState(false);
 
   const facets = useMemo(() => instrumentFacets(), []);
+  const unitCode = unitFilter && unitFilter.length === 3 ? unitFilter : null;
+  const unitOnly = unitFilter && unitFilter.length === 2 ? unitFilter : null;
+
   const matches = useMemo(
     () => searchInstruments({ q, variable, deviceClass, unitCode, limit: Number.MAX_SAFE_INTEGER }),
     [q, variable, deviceClass, unitCode],
   );
+  // "On a drawing" is a real filter: 31 tags carry no readable unit code, so no
+  // drawing can be tied to them.
+  const visible = useMemo(
+    () =>
+      matches.filter((entry) => {
+        if (unitOnly && unitOfInstrument(entry) !== unitOnly) return false;
+        if (onDrawing && instrumentContext(entry).placements.length === 0) return false;
+        return true;
+      }),
+    [matches, unitOnly, onDrawing],
+  );
   // The first screenful is enough — the filters and the search box narrow it down.
-  const results = useMemo(() => matches.slice(0, PAGE), [matches]);
+  const results = useMemo(() => visible.slice(0, PAGE), [visible]);
 
   // Keep ?q= shareable so a colleague can be sent a specific lookup.
   const updateQuery = (value: string) => {
@@ -181,11 +256,20 @@ export default function Instruments() {
     setQ("");
     setVariable(null);
     setDeviceClass(null);
-    setUnitCode(null);
+    setUnitFilter(null);
+    setOnDrawing(false);
     setParams(new URLSearchParams(), { replace: true });
   };
 
-  const filtered = q.trim().length > 0 || variable || deviceClass || unitCode;
+  // Keep ?unit= shareable too, so a drawing can send a colleague here.
+  const setUnit = (value: string | null) => {
+    setUnitFilter(value);
+    const next = new URLSearchParams(params);
+    if (value) next.set("unit", value); else next.delete("unit");
+    setParams(next, { replace: true });
+  };
+
+  const filtered = q.trim().length > 0 || variable || deviceClass || unitFilter || onDrawing;
 
   return (
     <div className="px-4 md:px-8 py-6 md:py-8 max-w-7xl mx-auto space-y-6">
@@ -277,6 +361,37 @@ export default function Instruments() {
                 </div>
               ))}
             </div>
+
+            {/* How the drawings are tied to a tag — and how far it goes. */}
+            <div className="border border-amber-500/30 bg-amber-500/5 rounded-lg px-3 py-2.5 space-y-1.5" data-testid="drawing-caveat">
+              <div className="text-[10px] font-mono uppercase tracking-widest text-amber-500/90 flex items-center gap-1.5">
+                <AlertTriangle className="h-3 w-3" />
+                {L(lang, "Where the drawing comes from", "D'où vient le plan")}
+              </div>
+              <ul className="text-[11px] text-foreground/80 space-y-1 list-disc pl-4">
+                <li>
+                  {L(
+                    lang,
+                    "A tag is tied to the drawings of its unit, through the unit code in the tag (101 → unit 01 → 85-X01-…).",
+                    "Un tag est relié aux plans de son unité, via le code unité du tag (101 → unité 01 → 85-X01-…).",
+                  )}
+                </li>
+                <li>
+                  {L(
+                    lang,
+                    "Which sheet it is on exactly is not known: instrument bubbles are graphics, so the extraction cannot place them. Open the drawing and look for the loop number.",
+                    "La feuille exacte n'est pas connue : les bulles d'instruments sont des graphiques, l'extraction ne peut pas les situer. Ouvrez le plan et cherchez le numéro de boucle.",
+                  )}
+                </li>
+                <li>
+                  {L(
+                    lang,
+                    "Ranges, spans and datasheets are not in this system — use the instrument loop folder.",
+                    "Les étendues, spans et fiches techniques ne sont pas dans ce système — utilisez le classeur de boucle.",
+                  )}
+                </li>
+              </ul>
+            </div>
           </div>
         )}
       </div>
@@ -304,19 +419,39 @@ export default function Instruments() {
           label={L(lang, "Unit", "Unité")}
           options={facets.byUnit.map(u => ({ key: u.code, label: `${u.code} · ${L(lang, u.en, u.fr)}`, count: u.count }))}
           active={unitCode}
-          onPick={key => setUnitCode(key)}
+          multiActive={unitOnly ? (code) => code.length === 3 && code.slice(1) === unitOnly : null}
+          onPick={setUnit}
           lang={lang}
         />
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="inline-flex items-center gap-1.5 text-xs font-mono text-muted-foreground mr-1">
+            <FileText className="h-3.5 w-3.5" />
+            {L(lang, "Drawing", "Plan")}
+          </span>
+          <button
+            type="button"
+            aria-pressed={onDrawing}
+            data-testid="filter-on-drawing"
+            onClick={() => setOnDrawing(v => !v)}
+            className={`px-2.5 py-1 rounded-full text-[11px] font-mono border transition-all ${
+              onDrawing
+                ? "bg-cyan-500 border-cyan-500 text-slate-950"
+                : "border-border text-muted-foreground hover:border-cyan-500/40 hover:text-foreground"
+            }`}
+          >
+            {L(lang, "Has a drawing", "A un plan")}
+          </button>
+        </div>
       </div>
 
       {/* Result count */}
       <div className="flex items-center gap-2 text-sm" data-testid="instrument-count">
-        <Badge variant="outline" className="font-mono text-xs">{matches.length}</Badge>
+        <Badge variant="outline" className="font-mono text-xs">{visible.length}</Badge>
         <span className="text-muted-foreground">
           {L(lang, "instrument(s) matching", "instrument(s) correspondant(s)")}
           {q.trim() ? ` « ${q.trim()} »` : ""}
         </span>
-        {matches.length > results.length && (
+        {visible.length > results.length && (
           <span className="text-[11px] font-mono text-muted-foreground">
             {L(lang, `showing the first ${results.length}`, `affichage des ${results.length} premiers`)}
           </span>
@@ -332,7 +467,7 @@ export default function Instruments() {
       {results.length > 0 ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {results.map(entry => (
-            <InstrumentCard key={entry.tag} entry={entry} lang={lang} />
+            <InstrumentCard key={entry.tag} entry={entry} lang={lang} onLocate={setLocated} />
           ))}
         </div>
       ) : (
@@ -341,17 +476,21 @@ export default function Instruments() {
           <p className="font-mono text-sm">{L(lang, "No instrument matches your filter.", "Aucun instrument ne correspond à votre filtre.")}</p>
         </div>
       )}
+
+      <InstrumentLocator entry={located} open={located !== null} onOpenChange={open => !open && setLocated(null)} />
     </div>
   );
 }
 
 function FacetRow({
-  icon, label, options, active, onPick, lang,
+  icon, label, options, active, multiActive, onPick, lang,
 }: {
   icon: React.ReactNode;
   label: string;
   options: Array<{ key: string; label: string; count: number }>;
   active: string | null;
+  /** Extra predicate: several chips can be lit at once, e.g. every train of unit 06. */
+  multiActive?: ((key: string) => boolean) | null;
   onPick: (key: string | null) => void;
   lang: "en" | "fr";
 }) {
@@ -362,7 +501,7 @@ function FacetRow({
         {icon}{label}
       </span>
       {options.map(option => {
-        const isActive = active === option.key;
+        const isActive = active === option.key || Boolean(multiActive?.(option.key));
         return (
           <button
             key={option.key}

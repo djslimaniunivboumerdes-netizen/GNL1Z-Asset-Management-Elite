@@ -1,8 +1,9 @@
 import React, { useState, useMemo, useCallback, useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useI18n } from "@/contexts/I18nContext";
 import { pidSheetByFile } from "@/lib/pidIndex";
-import { X, ZoomIn, ExternalLink, Search, Filter, ChevronRight, FileImage, FileText } from "lucide-react";
+import { instrumentCountForUnit, unitOfSheet } from "@/lib/instrumentLocation";
+import { X, ZoomIn, ExternalLink, Search, Filter, ChevronRight, FileImage, FileText, Gauge, ArrowUpRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -411,6 +412,10 @@ export default function PIDViewer() {
   const T = (en: string, fr: string) => (lang === "fr" ? fr : en);
   const selectedLocal = selected ? SHEET_FILES[selected.id] ?? null : null;
   const selectedIndex = selectedLocal ? pidSheetByFile(selectedLocal) : null;
+  // Which plant unit this drawing belongs to, and how many DCS instruments
+  // belong to the same unit — the way back from a drawing to the instrument list.
+  const sheetUnit = selectedLocal ? unitOfSheet(selectedLocal) : null;
+  const unitInstrumentCount = useMemo(() => instrumentCountForUnit(sheetUnit), [sheetUnit]);
   // Once the drawings have been migrated to the private bucket the static path
   // no longer resolves; the register turns it into a signed URL, or says why it
   // cannot be opened instead of showing a blank frame.
@@ -765,6 +770,17 @@ export default function PIDViewer() {
                     <span className="text-muted-foreground mr-1">{T("Callouts", "Repères")}:</span>
                     {selectedIndex.lineCalls.slice(0, 10).map((call) => call.asRead).join(" · ")}
                   </div>
+                )}
+                {sheetUnit && unitInstrumentCount > 0 && (
+                  <Link
+                    to={`/instruments?unit=${sheetUnit}`}
+                    data-testid="pid-unit-instruments"
+                    className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-mono border border-cyan-500/30 text-cyan-700 dark:text-cyan-400 hover:bg-cyan-500/10 transition-colors"
+                  >
+                    <Gauge className="h-3 w-3" />
+                    {unitInstrumentCount} {T("instruments of unit", "instruments de l'unité")} {sheetUnit}
+                    <ArrowUpRight className="h-3 w-3" />
+                  </Link>
                 )}
               </div>
             )}
