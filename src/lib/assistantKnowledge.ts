@@ -1,6 +1,7 @@
 import knowledgeJson from "../data/assistant_knowledge.json";
 import { buildAliasIndex, compactTag, resolveEquipmentTag, type AliasRecord, type AliasResolution } from "./equipmentAliases";
 import { queryLineList, type LineListDataset, type LineListRow } from "./lineListCsv";
+import { connectionsForTag, pidCoverage, pidSheetByFile } from "./pidIndex";
 
 export interface KnowledgeEquipment extends AliasRecord {
   kind: "register";
@@ -71,7 +72,8 @@ export function allAliasRecords(): Array<KnowledgeEquipment | DrawingAsset> {
 export function detectIntent(prompt: string): QuestionIntent {
   const q = prompt.toLowerCase();
   if (/(how many|count|number of|combien|nombre de).*(pipe|line|ligne|tuyaut)|(pipe|line|ligne|tuyaut).*(how many|count|combien|nombre)/.test(q)) return "line_count";
-  if (/(size|diameter|diamètre|diametre|dn|nps|taille|dimension).*(pipe|line|ligne|tuyaut|connect)|(pipe|line|ligne|tuyaut).*(size|diameter|diamètre|diametre|dn|nps|taille)/.test(q)) return "line_sizes";
+  // French asks it as "quels diamètres sont raccordés à …", without a pipe/line noun.
+  if (/(size|diameter|diam[eèè]tre|diam[eè]tres|dn|nps|taille|dimension).*(pipe|line|ligne|tuyaut|connect|raccord|branch)|(pipe|line|ligne|tuyaut).*(size|diameter|diam[eè]tre|dn|nps|taille)/.test(q)) return "line_sizes";
   if (/(alarm|alert|alarme|alerte|simulat)/.test(q)) return "alarm";
   if (/(manual|procedure|procédure|procedures|manuel|s\d{2})/.test(q)) return "manual";
   if (/(dcs|panel|panneau|screen|écran|ecran|synoptique)/.test(q)) return "dcs";
@@ -101,7 +103,13 @@ function pidSources(ids: string[], fileIds: string[], lang: string): KnowledgeSo
   for (const id of fileIds) {
     const file = KNOWLEDGE.pidFiles.find((item) => item.id === id);
     if (!file || sources.some((source) => source.href === file.file)) continue;
-    sources.push({ kind: "pid", id: file.id, title: file.title, href: file.file, detail: L(lang, "Local P&ID PDF · not text-indexed", "PDF P&ID local · non indexé en texte") });
+    const indexed = pidSheetByFile(file.file);
+    const detail = indexed
+      ? (indexed.verified
+        ? L(lang, `Reviewed drawing extraction · ${indexed.sizes.length} size(s) read`, `Extraction de plan relue · ${indexed.sizes.length} diamètre(s) lus`)
+        : L(lang, `Drawing index (OCR) · ${indexed.sizes.length} size(s) read · not verified`, `Index de plan (OCR) · ${indexed.sizes.length} diamètre(s) lus · non vérifié`))
+      : L(lang, "Local P&ID PDF · not indexed", "PDF P&ID local · non indexé");
+    sources.push({ kind: "pid", id: file.id, title: file.title, href: file.file, detail });
   }
   return sources;
 }
@@ -221,9 +229,35 @@ export function buildKnowledgeAnswer(options: {
         coverage.push(...result.warnings);
         coverage.push(L(lang, "Counts and sizes are only as complete as the supplied CSV; they are not a field verification.", "Les nombres et diamètres dépendent de l'exhaustivité du CSV fourni ; ce n'est pas une vérification sur site."));
       } else {
-        sections.push(L(lang,
-          `### Piping answer not yet verified\n\nI located \`${record.tag}\` in the reference sources, but no verified piping line list is loaded. I cannot give a trustworthy pipeline count or connected pipe sizes from a P&ID filename alone. Attach a line-list CSV with line number, from/to, and size columns, or open the matched P&ID for an engineered takeoff.`,
-          `### Réponse tuyauterie non encore vérifiée\n\nJ'ai localisé \`${record.tag}\` dans les sources, mais aucune liste de lignes vérifiée n'est chargée. Je ne peux pas donner un nombre fiable de tuyauteries ni les diamètres raccordés à partir du seul nom d'un P&ID. Joignez un CSV de liste de lignes avec numéro de ligne, from/to et diamètre, ou ouvrez le P&ID correspondant pour un relevé d'ingénierie.`));
+        // No verified CSV — answer from the drawings that were read once and
+        // indexed, and be explicit about how trustworthy that reading is.
+        const connections = connectionsForTag(record.tag);
+        if (connections.sheets.length && (connections.sizes.length || connections.lineCalls.length)) {
+          const perSheet = connections.sheets.slice(0, 4).map((sheet) => {
+            const title = sheet.titleEn ?? sheet.title;
+            const drawing = sheet.drawing ? ` · ${sheet.drawing}` : "";
+            const sizes = sheet.sizes.length
+              ? sheet.sizes.join(", ")
+              : L(lang, "no size read on this sheet", "aucun diamètre lu sur cette feuille");
+            const calls = sheet.lineCalls.slice(0, 6).map((call) => `\`${call.asRead}\``).join(", ");
+            return `- **${title}**${drawing} → [${L(lang, "open drawing", "ouvrir le plan")}](${sheet.file})\n  - ${L(lang, "Nominal sizes read", "Diamètres nominaux lus")}: ${sizes}${calls ? `\n  - ${L(lang, "Line callouts read", "Repères de ligne lus")}: ${calls}` : ""}`;
+          }).join("\n");
+          sections.push(L(lang,
+            `### Pipe sizes read on the P&ID${connections.verified ? "" : " (not verified)"}\n\n\`${record.tag}\` appears on ${connections.sheets.length} drawing(s) in the P&ID index (${pidCoverage().indexed}/${pidCoverage().sheets} sheets indexed).\n\n${perSheet}\n\n**Distinct sizes across those drawings:** ${connections.sizes.join(", ") || L(lang, "none read", "aucun lu")}.`,
+            `### Diamètres lus sur le P&ID${connections.verified ? "" : " (non vérifié)"}\n\n\`${record.tag}\` apparaît sur ${connections.sheets.length} plan(s) de l'index P&ID (${pidCoverage().indexed}/${pidCoverage().sheets} feuilles indexées).\n\n${perSheet}\n\n**Diamètres distincts sur ces plans :** ${connections.sizes.join(", ") || L(lang, "aucun lu", "aucun lu")}.`));
+          if (!connections.verified) {
+            sections.push(L(lang,
+              `### Read this before you use the numbers\n\nThe drawings are scans, so these sizes were read by OCR over the raster and **no engineer has signed them off**. OCR confuses digits and separators on dense callouts (\`5\`/\`S\`, \`-\`/\`=\`). Treat every value as a pointer to where to look on the drawing, never as a design or work-permit value. For a verified answer, attach the piping line list CSV (line number, from/to, size) and I will answer from those rows instead.`,
+              `### À lire avant d'utiliser ces valeurs\n\nLes plans sont des scans : ces diamètres ont été lus par OCR sur l'image et **aucun ingénieur ne les a validés**. L'OCR confond chiffres et séparateurs sur les repères denses (\`5\`/\`S\`, \`-\`/\`=\`). Considérez chaque valeur comme une indication de où chercher sur le plan, jamais comme une valeur de conception ou d'autorisation de travail. Pour une réponse vérifiée, joignez le CSV de liste de lignes (numéro de ligne, from/to, diamètre) et je répondrai depuis ces lignes.`));
+          }
+          coverage.push(L(lang,
+            `Sizes and callouts come from the P&ID index (${pidCoverage().backend}, generated ${pidCoverage().generatedAt.slice(0, 10)}): ${pidCoverage().note}`,
+            `Diamètres et repères issus de l'index P&ID (${pidCoverage().backend}, généré le ${pidCoverage().generatedAt.slice(0, 10)}) : ${pidCoverage().note}`));
+        } else {
+          sections.push(L(lang,
+            `### Piping answer not yet verified\n\nI located \`${record.tag}\` in the reference sources, but no verified piping line list is loaded and no drawing yielded a readable callout for this tag. I will not infer a pipe size from a filename. Attach a line-list CSV with line number, from/to, and size columns, or open the matched P&ID for an engineered takeoff.`,
+            `### Réponse tuyauterie non encore vérifiée\n\nJ'ai localisé \`${record.tag}\` dans les sources, mais aucune liste de lignes vérifiée n'est chargée et aucun plan n'a fourni de repère lisible pour ce repère. Je ne déduis pas un diamètre à partir d'un nom de fichier. Joignez un CSV de liste de lignes avec numéro de ligne, from/to et diamètre, ou ouvrez le P&ID correspondant pour un relevé d'ingénierie.`));
+        }
       }
     } else if (record.kind === "register") {
       const missing = [
@@ -252,7 +286,15 @@ export function buildKnowledgeAnswer(options: {
     if (panels.length) sections.push(L(lang, `### DCS references\n\n${panels.map((panel) => `- **${panel.title_en}**: ${panel.detectedTags.length} pre-scanned instrument tags. The image itself has not been re-verified in this answer.`).join("\n")}`, `### Références DCS\n\n${panels.map((panel) => `- **${panel.title_fr}** : ${panel.detectedTags.length} tags d'instruments pré-détectés. L'image elle-même n'a pas été revérifiée dans cette réponse.`).join("\n")}`));
   }
   if (intent === "pid" && record) {
-    sections.push(L(lang, "### P&ID references\n\nThe matched sheets/PDFs are listed below. They are drawing references, not a verified line takeoff. Confirm the approved revision before engineering use.", "### Références P&ID\n\nLes feuilles/PDF correspondants sont listés ci-dessous. Ce sont des références de plan, pas un relevé de lignes vérifié. Confirmez la révision approuvée avant usage d'ingénierie."));
+    const connections = connectionsForTag(record.tag);
+    const read = connections.sheets.filter((sheet) => sheet.sizes.length || sheet.lineCalls.length);
+    if (read.length) {
+      sections.push(L(lang,
+        `### What the drawing index read\n\n${read.slice(0, 4).map((sheet) => `- **${sheet.titleEn ?? sheet.title}**: ${sheet.sizes.length ? `${L(lang, "sizes", "diamètres")} ${sheet.sizes.slice(0, 8).join(", ")}` : L(lang, "no size read", "aucun diamètre lu")} · ${sheet.lineCalls.length} ${L(lang, "line callout(s)", "repère(s) de ligne")}`).join("\n")}\n\n${connections.verified ? "" : L(lang, "OCR reading of a scanned drawing — confirm on the drawing itself.", "Lecture OCR d'un plan scanné — à confirmer sur le plan.")}`,
+        `### Ce que l'index de plans a lu\n\n${read.slice(0, 4).map((sheet) => `- **${sheet.titleFr ?? sheet.titleEn ?? sheet.title}** : ${sheet.sizes.length ? `${L(lang, "diamètres", "diamètres")} ${sheet.sizes.slice(0, 8).join(", ")}` : L(lang, "aucun diamètre lu", "aucun diamètre lu")} · ${sheet.lineCalls.length} ${L(lang, "repère(s) de ligne", "repère(s) de ligne")}`).join("\n")}\n\n${connections.verified ? "" : L(lang, "Lecture OCR d'un plan scanné — à confirmer sur le plan.", "Lecture OCR d'un plan scanné — à confirmer sur le plan.")}`));
+    } else {
+      sections.push(L(lang, "### P&ID references\n\nThe matched sheets/PDFs are listed below. They are drawing references, not a verified line takeoff. Confirm the approved revision before engineering use.", "### Références P&ID\n\nLes feuilles/PDF correspondants sont listés ci-dessous. Ce sont des références de plan, pas un relevé de lignes vérifié. Confirmez la révision approuvée avant usage d'ingénierie."));
+    }
   }
   if (intent === "alarm") {
     const relevant = record ? alarms.filter((alarm) => compactTag(alarm.tag) === compactTag(record.tag)) : alarms;
@@ -276,6 +318,21 @@ export function knowledgeProviderContext(answer: KnowledgeAnswer) {
     equipment: KNOWLEDGE.equipment.filter((item) => tags.includes(item.tag)),
     drawingAssets: KNOWLEDGE.drawingAssets.filter((item) => tags.includes(item.tag)),
     pidSheets: KNOWLEDGE.pidSheets.filter((sheet) => answer.sources.some((source) => source.kind === "pid" && source.id === sheet.id)),
+    pidIndex: answer.resolution.status === "resolved"
+      ? (() => {
+          const connections = connectionsForTag(answer.resolution.matches[0].record.tag);
+          return {
+            coverage: pidCoverage(),
+            sheets: connections.sheets.map((sheet) => ({
+              file: sheet.file,
+              drawing: sheet.drawing,
+              verified: sheet.verified,
+              sizes: sheet.sizes,
+              lineCalls: sheet.lineCalls.slice(0, 10).map((call) => call.asRead),
+            })),
+          };
+        })()
+      : null,
     dcsPanels: KNOWLEDGE.dcsPanels.filter((panel) => answer.sources.some((source) => source.kind === "dcs" && source.id === panel.id)),
     manuals: KNOWLEDGE.manuals.filter((manual) => answer.sources.some((source) => source.kind === "manual" && source.id === manual.id)),
     deterministicAnswer: answer.text,

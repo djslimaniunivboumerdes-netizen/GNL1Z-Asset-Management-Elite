@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import Fuse from "fuse.js";
-import { ArrowLeft, Copy, Check, Download, Wrench, Anchor, Snowflake, Package, Info, Search, FileText, Save, CalendarIcon, ExternalLink, QrCode, X, ShieldCheck, Plus, Trash2, Beaker, Gauge, Sparkles, AlertOctagon } from "lucide-react";
+import { ArrowLeft, Copy, Check, Download, Wrench, Anchor, Snowflake, Package, Info, Search, FileText, Save, CalendarIcon, ExternalLink, QrCode, X, ShieldCheck, Plus, Trash2, Beaker, Gauge, Sparkles, AlertOctagon, Ruler } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,7 @@ import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { SvgQr } from "@/components/SvgQr";
 import { ImageGallery } from "@/components/ImageGallery";
+import { PidConnections } from "@/components/PidConnections";
 import { MaintenanceTimeline } from "@/components/MaintenanceTimeline";
 import { EquipmentTestStatus } from "@/components/EquipmentTestStatus";
 import NotFound from "./NotFound";
@@ -171,6 +172,7 @@ export default function EquipmentDetail() {
         <TabsList className="w-full justify-start overflow-x-auto h-auto bg-secondary/60 border border-border rounded-2xl p-1.5 shadow-lg backdrop-blur-sm">
           <TabsTrigger value="tech" className="gap-2 text-xs font-mono py-2.5 px-4 rounded-xl data-[state=active]:bg-secondary data-[state=active]:text-cyan-700 dark:data-[state=active]:text-cyan-400 transition-all"><Info className="h-4 w-4" /> {t("techInfo")}</TabsTrigger>
           <TabsTrigger value="pdr" className="gap-2 text-xs font-mono py-2.5 px-4 rounded-xl data-[state=active]:bg-secondary data-[state=active]:text-cyan-700 dark:data-[state=active]:text-cyan-400 transition-all"><Package className="h-4 w-4" /> {t("pdr")}</TabsTrigger>
+          <TabsTrigger value="connections" className="gap-2 text-xs font-mono py-2.5 px-4 rounded-xl data-[state=active]:bg-secondary data-[state=active]:text-cyan-700 dark:data-[state=active]:text-cyan-400 transition-all"><Ruler className="h-4 w-4" /> {lang === "en" ? "Connections" : "Raccordements"}</TabsTrigger>
           <TabsTrigger value="tools" className="gap-2 text-xs font-mono py-2.5 px-4 rounded-xl data-[state=active]:bg-secondary data-[state=active]:text-cyan-700 dark:data-[state=active]:text-cyan-400 transition-all"><Wrench className="h-4 w-4" /> {t("toolPredictor")}</TabsTrigger>
           <TabsTrigger value="lifting" className="gap-2 text-xs font-mono py-2.5 px-4 rounded-xl data-[state=active]:bg-secondary data-[state=active]:text-cyan-700 dark:data-[state=active]:text-cyan-400 transition-all"><Anchor className="h-4 w-4" /> {t("lifting")}</TabsTrigger>
           <TabsTrigger value="insulation" className="gap-2 text-xs font-mono py-2.5 px-4 rounded-xl data-[state=active]:bg-secondary data-[state=active]:text-cyan-700 dark:data-[state=active]:text-cyan-400 transition-all"><Snowflake className="h-4 w-4" /> {t("insulation")}</TabsTrigger>
@@ -182,6 +184,15 @@ export default function EquipmentDetail() {
         </TabsContent>
 
         <TabsContent value="pdr" className="mt-6"><PdrTab parts={eq.spare_parts.items ?? []} tag={eq.tag} /></TabsContent>
+
+        <TabsContent value="connections" className="mt-6">
+          <section className="rounded-xl border border-border bg-card p-5 text-card-foreground sm:p-6">
+            <h3 className="text-xl font-bold text-foreground tracking-tight mb-4">
+              {lang === "en" ? "Connections read on the P&ID" : "Raccordements lus sur le P&ID"}
+            </h3>
+            <PidConnections tag={eq.tag} lang={lang === "fr" ? "fr" : "en"} />
+          </section>
+        </TabsContent>
 
         <TabsContent value="tools" className="mt-6">
           <ToolsTab boltSize={boltSize} wrench={wrench} tools={tools} liftingMethod={eq.maintenance.lifting_method} extraTools={eq.maintenance.tools} />
