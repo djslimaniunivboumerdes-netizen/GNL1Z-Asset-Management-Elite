@@ -53,7 +53,7 @@ export async function flushQueue(): Promise<{ logs: number; uploads: number; err
     for (const upload of await idb.pendingUploads.toArray()) {
       if (!upload.id || upload.uploaded_by !== user.id) continue;
       const clientId = upload.client_id ?? crypto.randomUUID();
-      const path = upload.upload_path ?? `${upload.tag}/${clientId}.webp`;
+      const path = upload.upload_path ?? `${upload.tag}/${upload.uploaded_by ?? "unknown"}/${clientId}.webp`;
       try {
         await idb.pendingUploads.update(upload.id, { client_id: clientId, upload_path: path });
         const { error } = await supabase.storage.from("equipment-photos").upload(path, upload.blob, { contentType: upload.mime_type, upsert: false });

@@ -41,7 +41,7 @@ class GnlDb extends Dexie {
         await transaction.table<PendingLog>("pendingLogs").toCollection().modify((log) => { log.client_id ??= crypto.randomUUID(); });
         await transaction.table<PendingUpload>("pendingUploads").toCollection().modify((upload) => {
           upload.client_id ??= crypto.randomUUID();
-          upload.upload_path ??= `${upload.tag}/${upload.client_id}.webp`;
+          upload.upload_path ??= `${upload.tag}/${upload.uploaded_by ?? "unknown"}/${upload.client_id}.webp`;
         });
       });
   }

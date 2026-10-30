@@ -25,7 +25,9 @@ export function PhotoUpload({ tag, onUploaded }: { tag: string; onUploaded?: () 
       const blob = await compressToWebP(file);
       const clientId = crypto.randomUUID();
       const upload: PendingUpload = {
-        client_id: clientId, upload_path: `${tag}/${clientId}.webp`, tag,
+        // The path carries the owner id: Storage policies grant write access to
+        // <tag>/<user_id>/*, so a user cannot write into someone else's folder.
+        client_id: clientId, upload_path: `${tag}/${user.id}/${clientId}.webp`, tag,
         file_name: file.name.replace(/\.[^.]+$/, "") + ".webp", mime_type: "image/webp",
         blob, uploaded_by: user.id, created_at: new Date().toISOString(),
       };

@@ -12,6 +12,7 @@ import { getEquipmentTagsFromDcsTags } from "@/data/dcs_equipment_map";
 import { findInstrument } from "@/lib/instrumentIndex";
 import { describeInstrument } from "@/lib/instrumentTags";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
 import { StorageImg } from "@/components/StorageImg";
 import NotFound from "./NotFound";
@@ -29,6 +30,7 @@ export default function DcsDetail() {
   const { id = "" } = useParams();
   const [searchParams] = useSearchParams();
   const { t, lang } = useI18n();
+  const { user } = useAuth();
 
   // 1. Check if id is a DCS Panel ID. If not, check if it's an instrument tag!
   let panel = getDcsPanel(id);
@@ -78,7 +80,33 @@ export default function DcsDetail() {
         body: { panel_id: panel.id, storage_path: panel.storage_path, force },
       });
       if (error) {
-        toast({ title: lang === "en" ? "Detection failed" : "Échec de détection", description: error.message, variant: "destructive" });
+        // The edge function now requires a signed-in user. Say so plainly
+        // instead of showing a generic failure.
+        toast({
+          title: lang === "en" ? "Detection failed" : "Échec de détection",
+          description: error.message,
+          variant: "destructive",
+        });
+        return;
+      }
+      if ((data as { error?: string })?.error === "UNAUTHORIZED") {
+        toast({
+          title: lang === "en" ? "Sign in required" : "Connexion requise",
+          description: lang === "en"
+            ? "Instrument detection reads plant documents and is limited to signed-in staff."
+            : "La détection d'instruments lit des documents d'usine et est réservée au personnel connecté.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if ((data as { error?: string })?.error === "RATE_LIMITED") {
+        toast({
+          title: lang === "en" ? "Too many detections" : "Trop de détections",
+          description: lang === "en"
+            ? "The detection quota for this account is reached. Try again later."
+            : "Le quota de détection de ce compte est atteint. Réessayez plus tard.",
+          variant: "destructive",
+        });
         return;
       }
       if ((data as { error?: string })?.error === "IMAGE_FETCH_FAILED") {
@@ -226,13 +254,18 @@ export default function DcsDetail() {
             {tags && <Badge variant="outline" className="font-mono text-xs bg-secondary text-muted-foreground border-border px-3 py-1 rounded-full ml-2">{tags.length}</Badge>}
           </div>
           <div className="flex gap-3">
+            {!user && (
+              <p className="self-center font-mono text-[11px] text-muted-foreground">
+                {lang === "en" ? "Sign in to run AI instrument detection." : "Connectez-vous pour lancer la détection AI."}
+              </p>
+            )}
             {(!tags || tags.length === 0) && (
-              <Button onClick={() => detect(false)} disabled={loading} size="sm" className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold gap-2 rounded-xl px-5 py-5 shadow-lg shadow-cyan-600/20 font-mono text-xs transition-all">
+              <Button onClick={() => detect(false)} disabled={loading || !user} title={!user ? (lang === "en" ? "Sign in to run AI instrument detection" : "Connectez-vous pour lancer la détection AI") : undefined} size="sm" className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold gap-2 rounded-xl px-5 py-5 shadow-lg shadow-cyan-600/20 font-mono text-xs transition-all">
                 <Sparkles className="h-4 w-4 text-cyan-700 dark:text-cyan-300" /> {loading ? "…" : (lang === "en" ? "Detect with AI" : "Détecter avec AI")}
               </Button>
             )}
             {tags && tags.length > 0 && (
-              <Button onClick={() => detect(true)} disabled={loading} size="sm" variant="outline" className="bg-secondary border-border text-foreground hover:text-foreground rounded-xl py-5 px-5 font-mono text-xs gap-2 cursor-pointer shadow-md">
+              <Button onClick={() => detect(true)} disabled={loading || !user} size="sm" variant="outline" className="bg-secondary border-border text-foreground hover:text-foreground rounded-xl py-5 px-5 font-mono text-xs gap-2 cursor-pointer shadow-md">
                 <RefreshCw className={`h-4 w-4 text-cyan-700 dark:text-cyan-400 ${loading ? "animate-spin" : ""}`} /> {lang === "en" ? "Re-scan" : "Re-scanner"}
               </Button>
             )}

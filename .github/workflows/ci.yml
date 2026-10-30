@@ -19,7 +19,11 @@ jobs:
         run: npm ci
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - name: Secret hygiene
+        run: node scripts/check-secrets.mjs
       - name: Typecheck, lint and regression tests
         run: npm run check
       - name: Production build and PWA generation
         run: npm run build
+      - name: Dependency audit (high and critical only)
+        run: npm audit --audit-level=high --omit=dev

@@ -14,9 +14,38 @@ Status: **enhanced release candidate**. The front end, offline behavior, and pro
 - Screening-only lifting/insulation guardrails; missing temperature is “not assessed”; out-of-table lifting loads do not receive a capped recommendation.
 - CI for locked install, typecheck, lint, tests, and production build.
 
-## P0 — required before operational production
+## Security remediation phase (2026-10-30) — status
 
-1. **Backend authorization and RLS review.** Define viewer/technician/supervisor/admin roles. Review public reads and authenticated writes on notes, logs, alerts, schedules, DCS detections, news cache, and AI cache. Current migrations allow any authenticated user to update/delete fast alerts and update alerts/schedules; decide whether that is intentional. Add owner/supervisor constraints and audit requirements before live use.
+The P0 items below were re-verified against the current code and **implemented**
+unless a line says otherwise. Detail, evidence and accepted risks: `docs/SECURITY.md`.
+
+| Finding | Classification | Status |
+|---|---|---|
+| Any user could set `profiles.role = 'admin'` (self-promotion) | vulnerability | **Fixed** — typed `app_role` enum, column privileges revoked, guard trigger |
+| `ai_responses_cache` world-readable and world-writable | vulnerability | **Fixed** — privileges revoked, policies dropped |
+| `detect-dcs-instruments` unauthenticated, wrote with the service role | vulnerability | **Fixed** — JWT required + in-function check, validated inputs, sanitised model output, per-user rate limit |
+| Any authenticated user could delete fast alerts / update all alerts | vulnerability | **Fixed** — delete admin-only, writes require an authorised role |
+| Maintenance, notes, test dates, photos, DCS detections publicly readable | defect | **Fixed** — reads require authentication, writes require ownership + role |
+| No maintenance lifecycle; any row could be written as final | defect | **Fixed** — `DRAFT → SUBMITTED → REVIEWED → APPROVED/REJECTED → CLOSED`, enforced by trigger, no self-approval, legacy rows marked `IMPORTED` |
+| No audit trail | defect | **Fixed** — append-only `public.audit_log` with triggers on logs and alerts |
+| Storage uploads unconstrained (size, MIME, path) | defect | **Fixed** — bucket limits + policy checks + owner-scoped paths |
+| `alert-photos` bucket missing from migrations | defect | **Fixed** — declared in `20261030000002` |
+| `supabase/config.toml` pinned the wrong project | defect | **Fixed** — left blank, explicit `supabase link` required |
+| `.env` tracked by git | config | **Fixed** — ignored, untracked, CI guard added. Values were publishable only; **still in git history** (rotation procedure in `docs/SECURITY.md`) |
+| P&IDs/PFDs/manuals served as static public assets | vulnerability | **Prepared, not executed** — classification, private bucket and access layer are in place; moving the files needs the document owner's authorisation |
+| `unsafe-eval` in CSP, dead `api.anthropic.com` origin | config | **Accepted risk R-03** — needs a staged regression run |
+| `disable_signup: false`, `password_min_length: 6` | config | **Unchanged** — live-auth settings, need authorisation |
+
+**Applied to a database? No.** Both migrations are written, syntax-checked and
+guarded by tests, but applying them to a project is your call
+(`docs/DATABASE_MIGRATIONS.md`).
+
+## P0 — still required before operational production
+
+1. **Apply and verify the migrations on staging.** Restore or create a staging
+   project, run `supabase db push`, then execute the verification queries and the
+   10-step manual plan in `docs/TESTING.md`. Role backfill from the legacy
+   free-text `role` column is a heuristic and must be reviewed by an administrator.
 2. **Live staging validation.** Restore/activate a staging Supabase project, apply migrations in order, verify auth, RLS, storage buckets/policies, offline sync, duplicate retries, and backup/restore. Do not test against live operational records.
 3. **Engineering sign-off.** Complete `ENGINEERING_VALIDATION.md`. Verify P&ID revisions, tag mapping, pressure-test basis, intervals, lifting/insulation assumptions, code editions, and acceptance criteria against approved documents.
 4. **Hosting and secrets.** Configure Cloudflare Pages (or equivalent) build output `dist/`, functions runtime, client-safe Supabase variables, optional server-side `GEMINI_API_KEY`, TLS, WAF/rate limiting, and rollback. Never expose service-role or provider keys to the browser.
