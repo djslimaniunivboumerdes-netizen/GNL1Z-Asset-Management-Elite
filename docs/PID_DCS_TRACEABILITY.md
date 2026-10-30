@@ -30,6 +30,7 @@ All of it is queryable from two places:
 | Requirement | Status | Where |
 |---|---|---|
 | OCR text extraction | **Done** | `scripts/ocr_pid_pages.py`, 44/44 sheets at 300 dpi |
+| Coverage of shipped drawings | **Done — verified 2026-10-30** | `src/test/pidCoverage.test.ts`: 44 PDFs on disk = 44 indexed, 0 orphans, figures in `docs/PID_INDEX.md` |
 | Tag recognition | **Done** | `scripts/build-pid-index.mjs`, 193 tags mapped |
 | Line number recognition | **Done (indicative)** | 521 line callouts, OCR digits unreliable |
 | Equipment identification | **Done** | register tags + drawing-only assets (`E520`, …) |

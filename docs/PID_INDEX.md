@@ -48,6 +48,34 @@ An unverified reading is presented as **where to look on the drawing**, never as
 design or work-permit value. The assistant says so in every answer, and the
 fallback for a tag with no readable callout is to refuse rather than guess.
 
+## Coverage — verified 2026-10-30
+
+Every drawing that ships was checked against the index that ships. Measured by
+`src/test/pidCoverage.test.ts` (6 tests, part of `npm run check`), which reads
+the filesystem rather than trusting the index:
+
+| Check | Result |
+|---|---|
+| PDFs in `public/pids` | **44** |
+| Sheets in `src/data/pid_index.json` | **44** |
+| Drawings on disk with no index entry | **0** |
+| Index entries pointing at a missing file | **0** |
+| Sheets with a sha256 + byte size | **44 / 44** |
+| Sheets whose byte size drifted > 1 KB from the file on disk | **0** |
+| Sheets carrying a drawing number | **32 / 44** (12 sheets have no number on the title block) |
+| Nominal size readings | **191** |
+| Tags in the tag → drawing map | **193** |
+| Sheets verified by a process engineer | **0 / 44** |
+
+So: **all 44 P&IDs are covered.** A drawing dropped into `public/pids` without
+re-running `npm run pid:index` now fails CI instead of silently answering
+questions from a stale index.
+
+Coverage is *not* the same as correctness: 0 / 44 sheets are signed off, so every
+value the assistant quotes stays indicative and cites its drawing. The 12 sheets
+without a drawing number are still answerable — they are cited by filename and
+title instead.
+
 ## Reproducing / upgrading
 
 ```bash

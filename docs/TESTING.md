@@ -32,7 +32,8 @@ node scripts/audit-documents.mjs    # static document exposure report (read-only
 | Equipment register integrity | `equipmentData.test.ts` |
 | Reliability KPIs (MTBF/MTTR/availability) | `reliability.test.ts` |
 | Assistant knowledge, citations, verified/unverified split | `assistantKnowledge.test.ts`, `aiAgentEndpoint.test.ts` |
-| P&ID index (coverage, catalogue-only sizes, tag aliasing, no guessing) | `pidIndex.test.ts` |
+| P&ID index (catalogue-only sizes, tag aliasing, no guessing) | `pidIndex.test.ts` |
+| P&ID coverage — every PDF in `public/pids` has an index entry, no orphans, checksums present, no silent re-export | `pidCoverage.test.ts` |
 | Edge-function input validation and model-output sanitisation | `edgeValidation.test.ts` |
 | Storage URL resolution (signed, cached, fallback) | `storageUrl.test.ts` |
 | Document classification and access decisions | `documentAccess.test.ts` |

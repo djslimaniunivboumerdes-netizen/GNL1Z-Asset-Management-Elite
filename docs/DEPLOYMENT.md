@@ -89,8 +89,66 @@ but a snapshot before touching a live database is cheap insurance.
 
 ## Environments
 
-There is no staging project today. The four Supabase projects owned by the
-account are: `gdkqetzkhgllwbpmqmux` (active, PG 17.6.1.121) and three dormant
-projects — `kdfwqpnfrkmpsnwhtqjy`, `tsxpfvfnstcmumoxdpgd`,
-`nwcpfsqsdjezkwkhxrqx`. Restoring one as staging is a dashboard operation and
-has **not** been done: it changes project state and needs authorisation.
+| Role | Project ref | Name | State |
+|---|---|---|---|
+| Production | `gdkqetzkhgllwbpmqmux` | *(unchanged)* | ACTIVE_HEALTHY, PG 17.6.1.121 |
+| Staging | `nwcpfsqsdjezkwkhxrqx` | `gnl1z-staging` | ACTIVE_HEALTHY, PG 17.6 — restored 2026-10-30 |
+| Dormant / unused | `kdfwqpnfrkmpsnwhtqjy`, `tsxpfvfnstcmumoxdpgd` | — | untouched |
+
+### Staging (`nwcpfsqsdjezkwkhxrqx`) — what was done to it
+
+It was one of the account's dormant projects; nothing of yours was deleted or
+purged to prepare it. On 2026-10-30 it was restored and brought to the same
+schema as the repository:
+
+1. All **11 migrations** in `supabase/migrations/` applied, in filename order.
+2. Verified on the live database: **RLS enabled on 13/13 public tables**, 2
+   intentional `true` policies, 4 storage buckets with size/MIME limits,
+   `consume_rate_limit('staging-probe', 2, '1 minute')` → `true, true, false`,
+   maintenance lifecycle transitions DRAFT→SUBMITTED accepted and
+   SUBMITTED→APPROVED / SUBMITTED→CLOSED rejected with no audit rows.
+3. Two defects the migrations missed were found there and fixed in the
+   migration files (**S-05** `TRUNCATE` held by `anon`/`authenticated`,
+   **S-06** `anon` holding INSERT/UPDATE/DELETE on every application table).
+
+Auth on staging differs from production **on purpose**, so test users can be
+created without a mail server:
+
+| Setting | Staging | Production | Why |
+|---|---|---|---|
+| `site_url` | `http://localhost:8081` | production origin | local dev server |
+| `mailer_autoconfirm` | `true` | `false` | no SMTP configured; test users confirm instantly |
+| `disable_signup` | `false` | `true` | staging needs self-service test accounts |
+| `uri_allow_list` | localhost:8081/5173, `8081-*.e2b.app`, `*.pages.dev` | production origins only | previews and local dev |
+
+**Keep those four settings off production.** `mailer_autoconfirm: true` on a
+project with real users would let anyone confirm an account for an address they
+do not own.
+
+### Pointing the app at staging
+
+```bash
+# .env.local — never commit it (scripts/check-secrets.mjs fails CI if you do)
+VITE_SUPABASE_URL=https://nwcpfsqsdjezkwkhxrqx.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=<staging publishable/anon key>   # Dashboard → Project Settings → API
+VITE_ALLOWED_ORIGIN=http://localhost:8081
+```
+
+Restart the dev server after changing these; Vite only reads env at boot.
+
+### Migration history is empty on staging — expected
+
+The migrations were applied through the SQL API, which does not write to the
+migration bookkeeping table, so `supabase db push` on staging would re-apply
+them from the beginning. Every migration is idempotent (`if not exists`,
+`drop policy if exists`, `DO` blocks, `add column if not exists`), so a re-run is
+safe, but run `supabase db push --dry-run` first if you would rather see the
+plan. Production is untouched: **no migration has been applied to
+`gdkqetzkhgllwbpmqmux`.**
+
+### Cost
+
+Staging is currently **running**. Two active projects fit the free plan; if you
+would rather not pay for idle capacity, pause it from the dashboard (or say the
+word and it can be paused for you) — restoration takes a couple of minutes and
+nothing is lost.
