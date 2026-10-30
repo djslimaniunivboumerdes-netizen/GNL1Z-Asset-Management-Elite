@@ -15,11 +15,11 @@ node scripts/audit-documents.mjs    # static document exposure report (read-only
 
 | Metric | Value |
 |---|---|
-| Test files | 34 |
-| Tests | 262 |
+| Test files | 39 |
+| Tests | 326 |
 | Typecheck | clean (`tsc -b`) |
 | Lint | clean |
-| Build | PWA with 108 precache entries |
+| Build | PWA with 111 precache entries |
 
 ## What is covered
 
@@ -29,6 +29,7 @@ node scripts/audit-documents.mjs    # static document exposure report (read-only
 | Engineering formulas, pressure test, lifting, insulation guardrails | `engineeringCalcs.test.ts` |
 | Unit conversion | `units.test.ts` |
 | ISA instrument tag interpretation | `instrumentTags.test.ts` |
+| Instrument ↔ drawing placement, provenance of every specification, stated gaps | `instrumentLocation.test.ts` |
 | Equipment register integrity | `equipmentData.test.ts` |
 | Reliability KPIs (MTBF/MTTR/availability) | `reliability.test.ts` |
 | Assistant knowledge, citations, verified/unverified split | `assistantKnowledge.test.ts`, `aiAgentEndpoint.test.ts` |
@@ -41,7 +42,8 @@ node scripts/audit-documents.mjs    # static document exposure report (read-only
 | Auth error mapping | `authErrors.test.ts` |
 
 ### Component (jsdom, Testing Library)
-`pidConnections.test.tsx`, `instruments.test.tsx`, `alertWorkflow.test.tsx`,
+`pidConnections.test.tsx`, `instruments.test.tsx` (card drawings, Locate dialog,
+`?unit=NN`, "has a drawing" filter), `alertWorkflow.test.tsx`,
 `equipmentDetail.test.tsx`, plus page-level coverage of loading, empty and error
 states.
 

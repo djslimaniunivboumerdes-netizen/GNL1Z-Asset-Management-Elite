@@ -23,7 +23,11 @@ All of it is queryable from two places:
   drawings carry this tag, what sizes and line callouts were read on them, and
   which DCS panels show its instruments.
 - **Instrument finder** (`/instruments`): search a tag, get the ISA meaning, the
-  equipment it belongs to, and the panels it appears on.
+  equipment it belongs to, the panels it appears on — and, since 2026-10-30, the
+  drawings that cover its unit, what those drawings show around it, and a
+  "Locate" panel listing every specification with its source.
+- **Drawing → instruments** (`/pids?file=…`): each indexed sheet deep-links to
+  `/instruments?unit=NN`, listing the instruments of that unit.
 
 ## What is implemented
 
@@ -37,9 +41,48 @@ All of it is queryable from two places:
 | Instrument-symbol detection | **NOT DONE** | would need vector or symbol-template matching; not attempted |
 | Document revision identification | **Partial** | drawing numbers curated; revision not OCR'd per sheet |
 | Search by tag and equipment | **Done** | `connectionsForTag`, `searchPidText` |
+| Instrument → drawing placement | **Done (unit-level)** | `src/lib/instrumentLocation.ts`: 497 of 528 tags placed, 31 unplaceable |
+| Drawing → instrument list | **Done** | `instrumentCountForUnit`, `/instruments?unit=NN` |
 | Source-page references | **Done** | every answer cites sheet + `/pids?file=…` |
 | Confidence scoring | **Partial** | per-sheet `verified` flag; no per-reading confidence yet |
 | Manual correction / reviewer approval | **NOT DONE** | no UI for correcting an OCR reading |
+
+## Placing an instrument on a drawing
+
+The question "where is this instrument?" is answered **at unit level**, and the
+answer says so. `src/lib/instrumentLocation.ts` ties a tag to the drawings of its
+unit in two ways, because a sheet can be identified either way:
+
+1. **Drawing number** — `LIC101204` is in unit `01`, so every sheet numbered
+   `85-X01-…` is a candidate (13 of the 44 sheets carry no readable number).
+2. **Equipment on the sheet** — every sheet showing equipment known to be in the
+   instrument's unit, which is what catches the sheets without a number.
+
+Measured on the current corpus (528 indexed instruments):
+
+| Figure | Value | How it was measured |
+|---|---|---|
+| Instruments with at least one drawing | **497 / 528** | `instrumentContext().placements.length > 0` |
+| Instruments no drawing can be tied to | **31** | no readable unit code in the tag |
+| Drawings per instrument | 1–7 | one unit has 6–7 sheets |
+| Instruments of a unit | e.g. unit 06 → 81 across trains 1/2/3/5/6 | `instrumentCountForUnit` |
+
+What this does **not** do, and why:
+
+- **It never says "this tag is on this sheet".** Instrument bubbles are graphics.
+  Measured: of 466 tags carrying a 5-or-more-digit number, 434 appear nowhere in
+  the drawing text; the 32 that "match" are coincidental substrings inside line
+  numbers and service text (`6X051051938` contains `10519`). So the panel states
+  that the exact position is unknown and tells the engineer to open the drawing
+  and look for the loop number.
+- **It never says "this instrument is tapped into line X".** Loop numbers are
+  1–3 digits, and a 3-digit search matches 137 of 200 sheets — noise. The lines
+  read on the drawing are listed as *what the drawing carries*, explicitly not
+  asserted as this instrument's connection.
+- **Nothing is marked verified.** Every specification row carries a source badge
+  — ISA tag, DCS scan, Register, or Drawing (OCR) — and only the equipment
+  register rows are marked verified. The panel ends with the unavailable fields
+  (calibrated range, span, model, datasheet) rather than leaving them blank.
 
 ## Instrument register fields
 
@@ -53,7 +96,8 @@ All of it is queryable from two places:
 | P&ID number | curated drawing numbers, OCR fallback | mixed |
 | P&ID revision | **not captured** | — |
 | DCS panel | `src/data/dcs_panels.ts` | curated |
-| Loop number | **not captured** | — |
+| Loop number | parsed from the tag (`parseInstrumentTag`) | decoded — **not** proof of the loop folder |
+| Unit / section | parsed from the tag + `UNIT_CATALOGUE` | decoded, cross-checked against the register |
 | Signal type, range, units, alarms | **not captured** | — |
 | Extraction confidence | `verified` boolean per sheet | no per-tag confidence |
 | Verification status | `verified: false` everywhere | **nothing is verified yet** |

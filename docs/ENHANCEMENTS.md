@@ -2,6 +2,32 @@
 
 This pass keeps the existing industrial visual language while fixing high-impact workflow, mobile, and loading problems.
 
+## Instrument finder ↔ P&ID drawings (2026-10-30)
+
+A DCS tag now answers the three questions an operator asks: where is it, what is
+around it, and what do we know about it.
+
+- **On the drawings** — every card lists the drawings that cover the instrument's
+  unit (`LIC101204` → unit 01 → `85-X01-…`), each one a deep link into the P&ID
+  viewer. 497 of the 528 indexed tags are placed this way; the remaining 31 carry
+  no readable unit code and the card says so instead of showing nothing.
+- **Locate panel** — a dialog per tag listing the drawings with their titles,
+  whether a vector PDF ships with the app, the equipment shown on them (linked to
+  `/equipment/<tag>` when the register knows it), and the piping each drawing
+  carries with sizes.
+- **Specifications with provenance** — every row is badged *ISA tag*, *DCS scan*,
+  *Register* or *Drawing (OCR)*. Only register rows are marked verified; no sheet
+  has been signed off by an engineer, and nothing is presented as verified.
+- **The gaps are listed, not hidden** — the exact bubble position, the tapped
+  line, and the calibrated range/span/datasheet are stated as unavailable with
+  the reason why.
+- **Both directions** — an indexed drawing links back to `/instruments?unit=NN`,
+  which keeps every train of that unit in scope (unit 06 → 81 instruments across
+  trains 1/2/3/5/6) and can be filtered to "Has a drawing".
+- Everything resolves from the pre-extracted index (`src/data/pid_index.json`);
+  nothing runs OCR at query time, and no claim is made that a tag was read on a
+  sheet — measured, 434 of 466 tags appear nowhere in the drawing text.
+
 ## Expert AI GNL1 enhancement
 
 - The assistant is named **Expert AI GNL1** and is explicitly a bounded, source-backed reference assistant, not a prediction engine or live telemetry source.

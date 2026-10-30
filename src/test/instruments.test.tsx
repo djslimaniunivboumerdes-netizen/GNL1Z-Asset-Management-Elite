@@ -8,6 +8,7 @@ import Instruments from "@/pages/Instruments";
 import DcsDirectory from "@/pages/DcsDirectory";
 import DcsDetail from "@/pages/DcsDetail";
 import { buildInstrumentIndex, findInstrument } from "@/lib/instrumentIndex";
+import { instrumentContext, instrumentCountForUnit } from "@/lib/instrumentLocation";
 
 function renderFinder(initialPath = "/instruments") {
   return render(
@@ -198,5 +199,109 @@ describe("Instrument decoding on the DCS screens", () => {
     // Every row links back to the finder for the full record.
     expect(within(table).getAllByRole("link")[0]).toHaveAttribute("href", expect.stringContaining("/instruments?q="));
     expect(toggle).toHaveAttribute("aria-pressed", "true");
+  });
+});
+
+describe("Instrument Finder on the drawings", () => {
+  it("shows which drawings cover the instrument's unit", () => {
+    renderFinder("/instruments?q=LIC101204");
+    const card = within(cards()[0]);
+    const drawings = card.getByTestId("instrument-drawings");
+    // Unit 01 drawings, citable by number.
+    expect(drawings).toHaveTextContent(/85-X01/);
+    const link = within(drawings).getAllByRole("link")[0];
+    expect(link).toHaveAttribute("href", expect.stringContaining("/pids?file="));
+    // And it says plainly that this is unit-level, not a located bubble.
+    expect(drawings).toHaveTextContent(/unit-level, not verified/);
+  });
+
+  it("says so when no drawing can be tied to a tag", () => {
+    const orphan = buildInstrumentIndex().find(entry => instrumentContext(entry).placements.length === 0)!;
+    renderFinder(`/instruments?q=${orphan.tag}`);
+    expect(within(cards()[0]).getByTestId("instrument-no-drawing")).toHaveTextContent(/No drawing could be tied/i);
+  });
+
+  it("opens the locator: where it is, what is around it, and what is unknown", async () => {
+    const user = userEvent.setup();
+    renderFinder("/instruments?q=LIC101204");
+
+    await user.click(within(cards()[0]).getByRole("button", { name: /Locate/ }));
+    const dialog = await screen.findByTestId("instrument-locator");
+
+    // Where it is.
+    const placements = within(dialog).getByTestId("locator-placements");
+    expect(placements).toHaveTextContent(/85-X01/);
+    expect(within(placements).getAllByRole("link", { name: /Open drawing/ }).length).toBeGreaterThan(0);
+
+    // What is around it.
+    expect(within(dialog).getByTestId("locator-equipment").textContent).not.toBe("");
+    expect(within(dialog).getByTestId("locator-lines")).toHaveTextContent(/none of these is asserted/i);
+
+    // Specifications carry their source, and nothing claims to be verified.
+    const specs = within(dialog).getByTestId("locator-specs");
+    expect(specs).toHaveTextContent(/ISA tag/);
+    expect(specs).toHaveTextContent(/Drawing \(OCR\)/);
+
+    // What the system cannot tell.
+    const missing = within(dialog).getByTestId("locator-missing");
+    expect(missing).toHaveTextContent(/exact position/i);
+    expect(missing).toHaveTextContent(/range/i);
+
+    expect(dialog).toHaveTextContent(/no sheet has been signed off/i);
+  });
+
+  it("opens the locator in French, with French sources", async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem("gnl1z-lang", "fr");
+    renderFinder("/instruments?q=LIC101204");
+
+    await user.click(within(cards()[0]).getByRole("button", { name: /Localiser/ }));
+    const dialog = await screen.findByTestId("instrument-locator");
+    expect(dialog).toHaveTextContent(/appartient à l'unité/);
+    expect(within(dialog).getByTestId("locator-specs")).toHaveTextContent(/Tag ISA/);
+  });
+
+  it("can be opened on one unit from a drawing", () => {
+    renderFinder("/instruments?unit=06");
+    // A drawing only knows its unit (06), so every train of it is in scope.
+    expect(cards().length).toBeGreaterThan(0);
+    expect(Number(screen.getByTestId("instrument-count").textContent?.match(/\d+/)?.[0])).toBe(
+      instrumentCountForUnit("06"),
+    );
+    for (const card of cards()) {
+      expect(within(card).getByTestId("instrument-drawings")).toHaveTextContent(/85-X06/);
+    }
+    // Each train of that unit reads as selected.
+    for (const code of ["106", "206", "306"]) {
+      expect(screen.getByRole("button", { name: new RegExp(`^${code} · `) })).toHaveAttribute("aria-pressed", "true");
+    }
+    // A unit that is not in scope stays off.
+    expect(screen.getByRole("button", { name: /^101 · / })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("filters out the tags no drawing can be tied to", async () => {
+    const user = userEvent.setup();
+    renderFinder();
+    const before = Number(screen.getByTestId("instrument-count").textContent?.match(/\d+/)?.[0] ?? "0");
+
+    await user.click(screen.getByTestId("filter-on-drawing"));
+    const after = Number(screen.getByTestId("instrument-count").textContent?.match(/\d+/)?.[0] ?? "0");
+    expect(after).toBeLessThan(before);
+    // 31 tags carry no readable unit code.
+    expect(before - after).toBe(31);
+    for (const card of cards()) {
+      expect(within(card).queryByTestId("instrument-no-drawing")).not.toBeInTheDocument();
+    }
+  });
+
+  it("explains how far the drawing link goes, in the help panel", async () => {
+    const user = userEvent.setup();
+    renderFinder();
+    await user.click(screen.getByRole("button", { name: /How to read a tag/ }));
+
+    const caveat = screen.getByTestId("drawing-caveat");
+    expect(caveat).toHaveTextContent(/drawings of its unit/);
+    expect(caveat).toHaveTextContent(/not known/);
+    expect(caveat).toHaveTextContent(/loop folder/);
   });
 });

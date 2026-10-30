@@ -215,3 +215,42 @@ export async function searchPidText(query: string, limit = 8): Promise<PidTextHi
 
   return hits.sort((a, b) => b.matches - a.matches || b.confidence - a.confidence).slice(0, limit);
 }
+
+/** The unit (plant area) a drawing belongs to, e.g. "06" for 85-X06-10.1. */
+export function pidSheetUnit(sheet: PidSheetIndex): string | null {
+  const fromDrawing = /X0?(\d{1,2})/i.exec(sheet.drawing ?? "");
+  if (fromDrawing) return fromDrawing[1].padStart(2, "0");
+
+  // No drawing number on the title block: fall back to the equipment tags read
+  // on the sheet (X06-E-520 → "06"), which is what the drawing is *about*.
+  const counts = new Map<string, number>();
+  for (const tag of sheet.equipment ?? []) {
+    const match = /^(?:X(\d{2})|(\d{2})X\d)-/i.exec(tag.trim());
+    const unit = match?.[1] ?? match?.[2];
+    if (unit) counts.set(unit, (counts.get(unit) ?? 0) + 1);
+  }
+  let best: { unit: string; count: number } | null = null;
+  for (const [unit, count] of counts) {
+    if (!best || count > best.count) best = { unit, count };
+  }
+  return best?.unit ?? null;
+}
+
+let SHEETS_BY_UNIT: Map<string, PidSheetIndex[]> | null = null;
+
+/** Every drawing that covers a plant unit, drawing number or not. */
+export function pidSheetsForUnit(unit: string | null | undefined): PidSheetIndex[] {
+  if (!unit) return [];
+  SHEETS_BY_UNIT ??= (() => {
+    const map = new Map<string, PidSheetIndex[]>();
+    for (const sheet of PID_INDEX.sheets) {
+      const key = pidSheetUnit(sheet);
+      if (!key) continue;
+      const list = map.get(key) ?? [];
+      list.push(sheet);
+      map.set(key, list);
+    }
+    return map;
+  })();
+  return SHEETS_BY_UNIT.get(unit) ?? [];
+}
