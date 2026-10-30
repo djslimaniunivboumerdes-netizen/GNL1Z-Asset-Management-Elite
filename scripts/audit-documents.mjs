@@ -10,45 +10,20 @@
  *   node scripts/audit-documents.mjs            # report
  *   node scripts/audit-documents.mjs --json     # machine-readable
  */
-import { readdirSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join } from "node:path";
+// Same classifier as the migration script, so the report and the migration can
+// never disagree about how many files are RESTRICTED.
+import { listPublicDocuments } from "./lib/document-classes.mjs";
 
 const ROOT = process.cwd();
 const PUBLIC_DIR = join(ROOT, "public");
 
-/** Mirrors src/lib/documentAccess.ts DOCUMENT_CLASSES. */
-const CLASS_BY_FOLDER = [
-  { match: /^pids?\//i, kind: "pid", classification: "RESTRICTED" },
-  { match: /^pfd\//i, kind: "pfd", classification: "RESTRICTED" },
-  { match: /^manuals?\//i, kind: "manual", classification: "RESTRICTED" },
-  { match: /^data\//i, kind: "line_list", classification: "INTERNAL" },
-  { match: /^images\//i, kind: "equipment_photo", classification: "INTERNAL" },
-];
-
-const DOCUMENT_EXTENSIONS = /\.(pdf|png|jpe?g|webp|csv|xlsx?|docx?)$/i;
-
-function walk(dir, out = []) {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) walk(full, out);
-    else out.push(full);
-  }
-  return out;
-}
-
-const files = walk(PUBLIC_DIR)
-  .map((file) => ({ file, rel: relative(PUBLIC_DIR, file).split("\\").join("/") }))
-  .filter(({ rel }) => DOCUMENT_EXTENSIONS.test(rel))
-  .map(({ file, rel }) => {
-    const rule = CLASS_BY_FOLDER.find((candidate) => candidate.match.test(rel));
-    return {
-      path: `/${rel}`,
-      bytes: statSync(file).size,
-      kind: rule?.kind ?? "unclassified",
-      classification: rule?.classification ?? "REVIEW",
-    };
-  })
-  .sort((a, b) => a.path.localeCompare(b.path));
+const files = listPublicDocuments(PUBLIC_DIR).map((doc) => ({
+  path: doc.publicPath,
+  bytes: doc.bytes,
+  kind: doc.kind,
+  classification: doc.classification,
+}));
 
 const byClass = {};
 for (const file of files) {
@@ -81,8 +56,9 @@ if (process.argv.includes("--json")) {
     if (restricted.length > 12) console.log(`    … and ${restricted.length - 12} more`);
     console.log("\n  Migration (requires authorisation): upload these to the private");
     console.log("  'restricted-documents' bucket, register them in");
-    console.log("  public.engineering_documents, then delete the public copies.");
-    console.log("  Deleting from the working tree does NOT remove them from git history.");
+    console.log("  public.engineering_documents, then archive the public copies");
+    console.log("  with scripts/upload-restricted-documents.mjs --archive-dir <dir>.");
+    console.log("  Removing them from the working tree does NOT remove them from git history.");
   }
   const unclassified = files.filter((file) => file.classification === "REVIEW");
   if (unclassified.length) {

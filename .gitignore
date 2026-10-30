@@ -35,3 +35,6 @@ test-results
 
 # Local extraction working directories (OCR output can be large)
 pid_work/
+
+# Document-migration working files (evidence only — never secrets)
+/document-migration-manifest.json

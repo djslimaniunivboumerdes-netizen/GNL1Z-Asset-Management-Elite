@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import LOCAL_FILES from "@/data/pid_sheet_files.json";
+import { useDocumentUrl } from "@/hooks/useDocumentUrl";
+import { documentNeedsSession } from "@/lib/documentRegistry";
 
 const ACCENT = "#f97316";
 
@@ -409,6 +411,12 @@ export default function PIDViewer() {
   const T = (en: string, fr: string) => (lang === "fr" ? fr : en);
   const selectedLocal = selected ? SHEET_FILES[selected.id] ?? null : null;
   const selectedIndex = selectedLocal ? pidSheetByFile(selectedLocal) : null;
+  // Once the drawings have been migrated to the private bucket the static path
+  // no longer resolves; the register turns it into a signed URL, or says why it
+  // cannot be opened instead of showing a blank frame.
+  const documentState = useDocumentUrl(selectedLocal);
+  const documentUrl = documentState.url ?? (selectedLocal ? assetUrl(selectedLocal) : null);
+  const documentBlocked = documentNeedsSession(documentState);
 
   return (
     <div className="min-h-screen bg-background">
@@ -630,16 +638,20 @@ export default function PIDViewer() {
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              {selectedLocal && (
+              {selectedLocal && !documentBlocked && (
                 <a
-                  href={assetUrl(selectedLocal)}
+                  href={documentUrl ?? assetUrl(selectedLocal)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 transition-colors"
-                  title={T("Vector PDF served from the app (offline capable)", "PDF vectoriel servi par l'application (hors ligne)")}
+                  title={
+                    documentState.source === "storage"
+                      ? T("Opened from private storage with a short-lived signed link", "Ouvert depuis le stockage privé avec un lien signé de courte durée")
+                      : T("Vector PDF served from the app (offline capable)", "PDF vectoriel servi par l'application (hors ligne)")
+                  }
                 >
                   <FileText className="h-3.5 w-3.5" />
-                  {T("Local PDF", "PDF local")}
+                  {documentState.source === "storage" ? T("Secure PDF", "PDF sécurisé") : T("Local PDF", "PDF local")}
                 </a>
               )}
               <a
@@ -705,15 +717,15 @@ export default function PIDViewer() {
               </div>
 
               <div className="mt-auto flex flex-col gap-2">
-                {selectedLocal && (
+                {selectedLocal && !documentBlocked && (
                   <a
-                    href={assetUrl(selectedLocal)}
+                    href={documentUrl ?? assetUrl(selectedLocal)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-2 w-full px-3 py-2 rounded text-xs font-mono border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 transition-colors"
                   >
                     <FileText className="h-3.5 w-3.5" />
-                    {T("Local vector PDF", "PDF vectoriel local")}
+                    {documentState.source === "storage" ? T("Secure vector PDF", "PDF vectoriel sécurisé") : T("Local vector PDF", "PDF vectoriel local")}
                     <ChevronRight className="h-3.5 w-3.5 ml-auto" />
                   </a>
                 )}
@@ -759,13 +771,33 @@ export default function PIDViewer() {
 
             {/* iframe preview */}
             <div className="flex-1 relative bg-[hsl(220_25%_4%)]">
-              <iframe
-                key={selectedLocal ?? selected.driveId}
-                src={selectedLocal ? assetUrl(selectedLocal) : previewUrl(selected.driveId)}
-                title={lang === "fr" ? selected.title.fr : selected.title.en}
-                className="w-full h-full border-0"
-                allow="autoplay"
-              />
+              {documentBlocked || (selectedLocal && !documentUrl && documentState.loading) ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center" data-testid="pid-document-blocked">
+                  <FileText className="h-6 w-6 text-amber-400" />
+                  <p className="text-sm font-semibold text-amber-300">
+                    {T("This drawing is in secure storage", "Ce plan est dans un stockage sécurisé")}
+                  </p>
+                  <p className="text-xs text-muted-foreground max-w-md">
+                    {documentState.reason ?? T("Sign in to open it.", "Connectez-vous pour l'ouvrir.")}
+                  </p>
+                  <a
+                    href={viewUrl(selected.driveId)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-1 px-3 py-1.5 rounded text-xs font-mono border border-white/20 text-white/80 hover:bg-white/10 transition-colors"
+                  >
+                    {T("Open in Drive instead", "Ouvrir dans Drive à la place")}
+                  </a>
+                </div>
+              ) : (
+                <iframe
+                  key={selectedLocal ?? selected.driveId}
+                  src={documentUrl ?? previewUrl(selected.driveId)}
+                  title={lang === "fr" ? selected.title.fr : selected.title.en}
+                  className="w-full h-full border-0"
+                  allow="autoplay"
+                />
+              )}
             </div>
           </div>
         </div>

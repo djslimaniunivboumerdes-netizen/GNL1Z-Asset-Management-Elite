@@ -207,12 +207,62 @@ fixed in the migration:
 Grants are now aligned with policies — no client role holds a privilege that no
 policy authorises.
 
-### Not verifiable on staging
+### Runtime behaviour, verified by role impersonation (2026-10-30)
 
-Runtime behaviour as `anon` and `authenticated` (JWT-scoped RLS) was **not**
-exercised: no users were created and no tokens were minted. Policies were
-verified as *definitions* and *privileges*, not end-to-end. That step needs the
-manual plan in `docs/TESTING.md`.
+The gap below is now closed. Rather than minting JWTs (no egress from this
+environment), each role was impersonated **inside a transaction** in the way
+PostgREST itself does it:
+
+```sql
+begin;
+set local role 'authenticated';
+set local request.jwt.claim.sub  = '<user uuid>';
+set local request.jwt.claim.role = 'authenticated';
+-- operation under test
+rollback;
+```
+
+Four accounts exist on staging for this (administrator, maintenance_technician,
+operations_viewer, auditor). **27 probes, all exactly as designed.** Full table
+in `docs/TESTING.md`; in summary:
+
+- administrator: manages the test-date register and the document register,
+  reviews maintenance, deletes alerts — and is still refused approval of a
+  record they performed themselves (`P0001`);
+- maintenance technician and operations viewer: create alerts and
+  maintenance/test records, read the drawings, and are refused the official
+  register and document writes (`42501`); editing a colleague's record silently
+  changes 0 rows;
+- auditor: every write refused, RESTRICTED documents invisible, audit log
+  readable;
+- anonymous: RESTRICTED documents invisible (0 rows), PUBLIC visible,
+  everything else refused at the privilege level.
+
+### Still not verifiable from here
+
+| What | Why |
+|---|---|
+| Storage upload/download through a signed URL | Needs a networked client; the sandbox has no egress to `*.supabase.co` |
+| Sign-in, photo upload, offline queue, PDF rendering in a browser | No headless browser in the stack |
+| `detect-dcs-instruments` HTTP behaviour | Function not deployed (no `GEMINI_API_KEY`) |
+
+## Two-tier access model (migration `20261030000003`)
+
+You asked for two levels, so the model is now exactly two levels plus a
+read-only role:
+
+| Tier | Who | May |
+|---|---|---|
+| Administrator | `role_key = 'administrator'` | Manage the test-date register, the engineering-document register and the `restricted-documents` bucket; approve, reject and close maintenance records; delete alerts; amend any record |
+| Plant user | Any signed-in account except an auditor | Read the drawings; create alerts, fast alerts and maintenance/test records; add notes and photographs; amend **their own** records |
+| Auditor | `role_key = 'auditor'` | Read the audit trail (and nothing writable). Every write is refused. |
+
+`public.is_plant_user()` is the predicate, and it fails closed: an account with
+no `profiles` row is not a plant user.
+
+Replaced: `public.can_write()` (every engineer and technician, but not
+operators) and `public.can_approve()` (five engineering roles) no longer gate
+any policy. Full probe results in `docs/TESTING.md`.
 
 ## Accepted risks
 
@@ -255,12 +305,22 @@ Executed only with the document owner's authorisation:
 2. Create the private `restricted-documents` bucket (migration
    `20261030000002`, idempotent).
 3. Upload each file to `restricted-documents/<class>/<filename>` preserving the
-   original bytes (sha256 compared before and after).
+   original bytes (sha256 compared before and after) —
+   `scripts/upload-restricted-documents.mjs`, runbook in
+   `docs/DOCUMENT_MIGRATION.md`.
 4. Insert a row per document into `public.engineering_documents` with
    classification, drawing number, revision, source page and
    `verified = false`.
-5. Point the UI at `documentUrl()` (`src/lib/documentAccess.ts`), which already
-   prefers the private path and falls back to the public one.
-6. Only then delete the public copies — **and note that deleting from the
-   working tree does not remove them from git history**; history purging is a
-   separate authorised operation.
+5. The UI follows automatically: `src/lib/documentRegistry.ts` maps the old
+   `/pids/….pdf` path to the stored object and serves a short-lived signed URL,
+   so existing links and assistant citations keep working. When a session may
+   not read the object, the viewer says so instead of showing a blank frame.
+6. Only then move the public copies out — `--archive-dir <outside public/>`
+   **moves** them (never deletes), and `--restore` puts them back. **Keep the
+   archive until the application has been exercised through a signed-in
+   session.** Removing them from the working tree does not remove them from git
+   history; history purging is a separate authorised operation.
+
+Status: steps 1–2 are done, step 3–6 need one run on a networked machine
+(`docs/DOCUMENT_MIGRATION.md`). Nothing has been uploaded and no original has
+been moved.
