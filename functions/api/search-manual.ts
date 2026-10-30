@@ -13,7 +13,8 @@
 import { MANUALS } from "../../src/data/manuals";
 
 interface ManualMeta { id: string; title: string; driveId: string }
-interface SearchHit  { id: string; title: string; driveId: string; count: number; snippets: string[] }
+interface SearchHit  { id: string; title: string; driveId: string; count: number; snippets: string[]; terms: string[] }
+interface SearchMeta { total: number; matched: number; failed: number; cached: number; elapsedMs: number }
 
 const ALLOWED_DRIVE_IDS = new Set(MANUALS.map((m) => m.drive_id));
 
@@ -95,25 +96,82 @@ export async function onRequestPost(ctx: { request: Request; env?: Record<string
     return json(200, { results: [] }, origin);
   }
 
+  const started = Date.now();
   const settled = await Promise.allSettled(
     manuals.map(m =>
-      race(searchManual(m, query), 14_000, { ...m, count: 0, snippets: [] })
+      race(searchManual(m, query), 14_000, null)
     )
   );
 
-  const results = settled
-    .map(r => (r.status === "fulfilled" ? r.value : null))
-    .filter((r): r is SearchHit => r !== null && r.count > 0)
-    .sort((a, b) => b.count - a.count);
+  let hits: SearchHit[] = [];
+  let failed = 0, scanned = 0, cached = 0;
 
-  return json(200, { results }, origin);
+  for (const r of settled) {
+    const value = r.status === "fulfilled" ? r.value : null;
+    if (!value || !value.ok) { failed += 1; continue; }
+    scanned += 1;
+    if (value.cached) cached += 1;
+    if (value.hit) hits.push(value.hit);
+  }
+  hits = hits.sort((a, b) => b.count - a.count);
+
+  const meta: SearchMeta = {
+    total: manuals.length,
+    matched: hits.length,
+    failed,
+    cached,
+    elapsedMs: Date.now() - started,
+  };
+  return json(200, { results: hits, meta }, origin);
+}
+
+// ── Warm cache: extracted text per document (per isolate) ────────────────────
+//
+// A cold search downloads + unzips every requested document; repeat searches
+// (refined terms, scoped re-runs) reuse the extracted text for 10 minutes.
+// Failures are remembered briefly too, so a permission-locked document does
+// not hammer Drive on every keystroke-level retry.
+const TEXT_TTL_MS  = 10 * 60_000;
+const FAIL_TTL_MS  = 60_000;
+const textCache = new Map<string, { text: string; at: number }>();
+const failCache = new Map<string, { at: number }>();
+
+type TextOutcome =
+  | { ok: true;  text: string; cached: boolean }
+  | { ok: false; cached: false };
+
+async function getManualText(driveId: string): Promise<TextOutcome> {
+  const hit = textCache.get(driveId);
+  if (hit && Date.now() - hit.at < TEXT_TTL_MS) return { ok: true, text: hit.text, cached: true };
+
+  const fail = failCache.get(driveId);
+  if (fail && Date.now() - fail.at < FAIL_TTL_MS) return { ok: false, cached: false };
+
+  try {
+    const text = await fetchDocxAsText(driveId);
+    textCache.set(driveId, { text, at: Date.now() });
+    failCache.delete(driveId);
+    if (textCache.size > 60) { // bound memory in the isolate
+      const oldest = textCache.keys().next().value;
+      if (oldest !== undefined) textCache.delete(oldest);
+    }
+    return { ok: true, text, cached: false };
+  } catch {
+    failCache.set(driveId, { at: Date.now() });
+    return { ok: false, cached: false };
+  }
 }
 
 // ── Search one manual ─────────────────────────────────────────────────────────
-async function searchManual(m: ManualMeta, query: string): Promise<SearchHit> {
-  const text     = await fetchDocxAsText(m.driveId);
-  const snippets = findSnippets(text, query, 200, 5);
-  return { ...m, count: snippets.length, snippets };
+async function searchManual(m: ManualMeta, query: string): Promise<{ ok: true; hit: SearchHit | null; cached: boolean } | { ok: false; cached: false }> {
+  const got = await getManualText(m.driveId);
+  if (!got.ok) return { ok: false, cached: false };
+  const { snippets, terms, count } = searchInText(got.text, query);
+  return {
+    ok: true,
+    cached: got.cached,
+    hit: count > 0 ? { ...m, count, snippets, terms } : null,
+  };
 }
 
 // ── Fetch + extract ───────────────────────────────────────────────────────────
@@ -263,34 +321,90 @@ function queryVariants(raw: string): string[] {
   });
 }
 
-// ── Find snippets — tries every query variant ─────────────────────────────────
-function findSnippets(text: string, query: string, ctx = 200, max = 5): string[] {
+// ── Find snippets for a list of terms ────────────────────────────────────────
+function findSnippets(text: string, terms: string[], ctx = 200, max = 5): string[] {
   const snips:   string[] = [];
   const usedPos  = new Set<number>(); // avoid duplicate snippets
+  const lc      = text.toLowerCase();
+  const unique  = [...new Set(terms.map(t => t.toLowerCase()).filter(Boolean))];
 
-  for (const variant of queryVariants(query)) {
-    const lc  = text.toLowerCase();
-    const lcV = variant.toLowerCase();
-    let   pos = 0;
-
+  for (const term of unique) {
+    let pos = 0;
     while (snips.length < max) {
-      const idx = lc.indexOf(lcV, pos);
+      const idx = lc.indexOf(term, pos);
       if (idx === -1) break;
 
       if (!usedPos.has(idx)) {
         usedPos.add(idx);
         const s = Math.max(0, idx - ctx);
-        const e = Math.min(text.length, idx + variant.length + ctx);
+        const e = Math.min(text.length, idx + term.length + ctx);
         snips.push((s > 0 ? "…" : "") + text.slice(s, e) + (e < text.length ? "…" : ""));
       }
 
-      pos = idx + Math.max(1, variant.length);
+      pos = idx + Math.max(1, term.length);
     }
 
     if (snips.length >= max) break;
   }
 
   return snips;
+}
+
+// Occurrence count over the union of all term positions (used for ranking).
+function countOccurrences(textLower: string, terms: string[]): number {
+  const positions = new Set<number>();
+  for (const raw of [...new Set(terms.map(t => t.toLowerCase()).filter(Boolean))]) {
+    let pos = 0;
+    for (;;) {
+      const idx = textLower.indexOf(raw, pos);
+      if (idx === -1) break;
+      positions.add(idx);
+      pos = idx + Math.max(1, raw.length);
+    }
+  }
+  return positions.size;
+}
+
+// ── Full-text search: phrase first, then AND-of-words ─────────────────────────
+//
+// 1. Phrase pass  — the whole query (plus tag variants like E-501/E501/E 501)
+//    must appear literally. This is what equipment-tag lookups rely on.
+// 2. AND pass     — for multi-word queries that are not a contiguous phrase:
+//    EVERY word (≥2 chars) must appear somewhere in the document; snippets are
+//    collected around the individual words. So "refrigeration propane" finds
+//    the manual even when the two words sit in different sentences.
+//
+// Returns snippet contexts, the terms to highlight client-side, and an
+// occurrence count for cross-document ranking.
+function searchInText(text: string, query: string): { snippets: string[]; terms: string[]; count: number } {
+  const variants = queryVariants(query);
+
+  const phraseSnips = findSnippets(text, variants, 200, 5);
+  if (phraseSnips.length) {
+    return { snippets: phraseSnips, terms: variants, count: countOccurrences(text.toLowerCase(), variants) };
+  }
+
+  const words = query.split(/\s+/).filter(w => w.length >= 2);
+  if (words.length >= 2) {
+    const wordTerms: string[] = [];
+    const everyWordPresent = words.every(word => {
+      const wordVariants = queryVariants(word);
+      wordTerms.push(...wordVariants);
+      const lc = text.toLowerCase();
+      return wordVariants.some(v => lc.includes(v.toLowerCase()));
+    });
+
+    if (everyWordPresent) {
+      const terms = [...new Set([...wordTerms, ...variants])];
+      return {
+        snippets: findSnippets(text, terms, 200, 5),
+        terms,
+        count: countOccurrences(text.toLowerCase(), wordTerms),
+      };
+    }
+  }
+
+  return { snippets: [], terms: variants, count: 0 };
 }
 
 // ── Timeout race ──────────────────────────────────────────────────────────────

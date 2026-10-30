@@ -21,6 +21,9 @@ const categoryColors: Record<string, string> = {
   Fractionation: "border-primary/40 text-primary",
 };
 
+// Sample queries for in-document search (equipment tag + domain keywords).
+const EXAMPLE_QUERIES = ["E-501", "propane", "flare", "shutdown"];
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface DocHit {
   id: string;
@@ -28,17 +31,33 @@ interface DocHit {
   driveId: string;
   count: number;
   snippets: string[];
+  terms?: string[];
+}
+
+interface SearchMeta {
+  total: number;
+  matched: number;
+  failed: number;
+  cached: number;
+  elapsedMs: number;
 }
 
 // ─── Highlight matching text ─────────────────────────────────────────────────
-function highlight(text: string, query: string): React.ReactNode[] {
-  if (!query) return [text];
-  const re    = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
-  const parts = text.split(re);
-  return parts.map((p, i) =>
-    re.test(p)
-      ? <mark key={i} className="bg-orange-500/30 text-orange-300 rounded px-0.5 not-italic font-semibold">{p}</mark>
-      : p
+// Deterministic: `split` with ONE capture group puts every match at an odd
+// index (the old `re.test()` loop advanced lastIndex and skipped matches).
+// `terms` come from the server (every query/tag variant that actually hit),
+// so a query of "E501" still highlights "E-501" inside the snippet.
+function highlight(text: string, terms: string[]): React.ReactNode[] {
+  const clean = [...new Set(terms.map(t => t.trim()).filter(Boolean))];
+  if (!clean.length) return [text];
+  const escaped = clean
+    .map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .sort((a, b) => b.length - a.length); // longest first: "E-501" beats "E"
+  const re = new RegExp(`(${escaped.join("|")})`, "gi");
+  return text.split(re).map((part, i) =>
+    i % 2 === 1
+      ? <mark key={i} className="bg-orange-500/30 text-orange-300 rounded px-0.5 not-italic font-semibold">{part}</mark>
+      : part,
   );
 }
 
@@ -46,6 +65,7 @@ function highlight(text: string, query: string): React.ReactNode[] {
 function DocResult({ hit, query }: { hit: DocHit; query: string }) {
   const [open, setOpen] = useState(true);
   const m = MANUALS.find(x => x.id === hit.id);
+  const terms = hit.terms?.length ? hit.terms : [query];
 
   return (
     <div className="border border-border rounded-xl bg-card overflow-hidden">
@@ -73,7 +93,7 @@ function DocResult({ hit, query }: { hit: DocHit; query: string }) {
         <div className="border-t border-border divide-y divide-border/50">
           {hit.snippets.map((snip, i) => (
             <p key={i} className="px-4 py-3 text-xs text-muted-foreground leading-relaxed font-mono">
-              {highlight(snip, query)}
+              {highlight(snip, terms)}
             </p>
           ))}
           {m && (
@@ -108,6 +128,9 @@ export default function Manuals() {
   const [docResults,  setDocResults]  = useState<DocHit[] | null>(null);
   const [docSearching, setDocSearching] = useState(false);
   const [docError,    setDocError]    = useState<string | null>(null);
+  const [docMeta,     setDocMeta]     = useState<SearchMeta | null>(null);
+  // When set, only this manual is downloaded + scanned (fast scoped search).
+  const [scopeId,     setScopeId]     = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   // Filtered list for metadata search
@@ -123,8 +146,8 @@ export default function Manuals() {
   });
 
   // ── In-document search handler ──
-  const handleDocSearch = async () => {
-    const term = docQuery.trim();
+  const handleDocSearch = async (termOverride?: string) => {
+    const term = (termOverride ?? docQuery).trim();
     if (term.length < 2) return;
 
     abortRef.current?.abort();
@@ -133,6 +156,10 @@ export default function Manuals() {
     setDocSearching(true);
     setDocError(null);
     setDocResults(null);
+    setDocMeta(null);
+    if (termOverride !== undefined) setDocQuery(termOverride);
+
+    const targets = (scopeId ? MANUALS.filter(m => m.id === scopeId) : MANUALS);
 
     try {
       const res = await fetch("/api/search-manual", {
@@ -140,7 +167,7 @@ export default function Manuals() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query: term,
-          manuals: MANUALS.map(m => ({
+          manuals: targets.map(m => ({
             id: m.id,
             title: lang === "en" ? m.title_en : m.title_fr,
             driveId: m.drive_id,
@@ -150,8 +177,9 @@ export default function Manuals() {
       });
 
       if (!res.ok) throw new Error(`Server error ${res.status}`);
-      const data = await res.json() as { results: DocHit[] };
+      const data = await res.json() as { results: DocHit[]; meta?: SearchMeta };
       setDocResults(data.results ?? []);
+      setDocMeta(data.meta ?? null);
     } catch (err: unknown) {
       if ((err as Error).name !== "AbortError") {
         setDocError((err as Error).message ?? "Search failed");
@@ -165,7 +193,24 @@ export default function Manuals() {
     abortRef.current?.abort();
     setDocResults(null);
     setDocError(null);
+    setDocMeta(null);
     setDocQuery("");
+  };
+
+  // Card action: jump into full-text mode scoped to one document.
+  const startScopedSearch = (id: string) => {
+    clearDocSearch();
+    setScopeId(id);
+    setDocMode(true);
+  };
+
+  // Empty full-text results → try titles/categories with the same term.
+  const fallBackToTitles = () => {
+    const term = docQuery;
+    setDocMode(false);
+    setScopeId(null);
+    clearDocSearch();
+    setQ(term);
   };
 
   return (
@@ -186,7 +231,7 @@ export default function Manuals() {
       {/* ── Mode toggle ── */}
       <div className="flex items-center gap-2 flex-wrap">
         <button
-          onClick={() => { setDocMode(false); clearDocSearch(); }}
+          onClick={() => { setDocMode(false); setScopeId(null); clearDocSearch(); }}
           className={[
             "inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-mono font-bold border transition-all",
             !docMode ? "bg-accent text-accent-foreground border-accent" : "border-border text-muted-foreground hover:border-accent/40",
@@ -217,20 +262,34 @@ export default function Manuals() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {list.map(m => (
-              <a key={m.id} href={driveDocViewUrl(m.drive_id)} target="_blank" rel="noopener noreferrer"
-                className="text-left group border border-border rounded-lg bg-card p-5 hover:border-accent/50 hover:shadow-card transition-all">
+              <div key={m.id}
+                className="text-left border border-border rounded-lg bg-card p-5 hover:border-accent/50 hover:shadow-card transition-all flex flex-col">
                 <div className="flex items-start justify-between mb-3">
                   <FileText className="h-5 w-5 text-accent" />
-                  <ExternalLink className="h-4 w-4 text-muted-foreground group-hover:text-accent transition-colors" />
+                  <Badge variant="outline" className={`font-mono text-[10px] ${categoryColors[m.category] ?? ""}`}>
+                    {m.category}
+                  </Badge>
                 </div>
                 <div className="font-mono text-xs font-bold text-accent mb-1">{m.id}</div>
-                <div className="font-display font-semibold leading-tight mb-3">
+                <div className="font-display font-semibold leading-tight mb-4">
                   {lang === "en" ? m.title_en : m.title_fr}
                 </div>
-                <Badge variant="outline" className={`font-mono text-[10px] ${categoryColors[m.category] ?? ""}`}>
-                  {m.category}
-                </Badge>
-              </a>
+                <div className="mt-auto flex items-center gap-2">
+                  <a href={driveDocViewUrl(m.drive_id)} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-[11px] font-mono border border-border rounded-md px-2.5 py-1.5 text-muted-foreground hover:text-accent hover:border-accent/40 transition-colors">
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    {lang === "en" ? "Open" : "Ouvrir"}
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => startScopedSearch(m.id)}
+                    aria-label={lang === "en" ? `Search inside ${m.id}` : `Recherche plein texte dans ${m.id}`}
+                    className="inline-flex items-center gap-1.5 text-[11px] font-mono border border-orange-500/30 text-orange-500 rounded-md px-2.5 py-1.5 hover:bg-orange-500/10 transition-colors">
+                    <FileSearch className="h-3.5 w-3.5" />
+                    {lang === "en" ? "Search inside" : "Plein texte"}
+                  </button>
+                </div>
+              </div>
             ))}
             {list.length === 0 && (
               <div className="col-span-full text-center text-muted-foreground py-12">{t("noResults")}</div>
@@ -242,6 +301,22 @@ export default function Manuals() {
       {/* ── IN-DOCUMENT SEARCH MODE ── */}
       {docMode && (
         <div className="space-y-5">
+          {/* Scope chip — one document only */}
+          {scopeId && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-mono font-bold border border-orange-500/40 bg-orange-500/10 text-orange-500 rounded-full px-3 py-1">
+                {lang === "en" ? "Searching in" : "Recherche dans"}: {scopeId}
+              </span>
+              <button
+                type="button"
+                onClick={() => setScopeId(null)}
+                aria-label={lang === "en" ? "Clear scope — search all documents" : "Retirer le périmètre — chercher dans tous les documents"}
+                className="text-[11px] font-mono text-muted-foreground hover:text-foreground inline-flex items-center gap-1 underline underline-offset-2">
+                {lang === "en" ? "all 23 documents" : "les 23 documents"}
+              </button>
+            </div>
+          )}
+
           {/* Search bar */}
           <div className="flex gap-2 max-w-xl">
             <div className="relative flex-1">
@@ -273,14 +348,36 @@ export default function Manuals() {
               <ScanText className="h-5 w-5 text-orange-500 shrink-0 mt-0.5" />
               <div>
                 <p className="font-semibold text-foreground mb-1">
-                  {lang === "en" ? "Full-text search across all 23 manuals" : "Recherche plein texte dans les 23 manuels"}
+                  {scopeId
+                    ? (lang === "en" ? `Full-text search inside ${scopeId}` : `Recherche plein texte dans ${scopeId}`)
+                    : (lang === "en" ? "Full-text search across all 23 manuals" : "Recherche plein texte dans les 23 manuels")}
                 </p>
                 <p className="text-xs leading-relaxed">
-                  {lang === "en"
-                    ? "Type an equipment tag (E-501), keyword, or phrase. Each document is scanned and matching passages are returned with context."
-                    : "Tapez un repère d'équipement (E-501), un mot-clé ou une phrase. Chaque document est analysé et les passages correspondants sont retournés avec leur contexte."}
+                  {scopeId
+                    ? (lang === "en"
+                        ? "Only this document is downloaded and scanned — the fastest path for long phrases or repeated queries."
+                        : "Seul ce document est téléchargé et analysé — le chemin le plus rapide pour les longues phrases ou les recherches répétées.")
+                    : (lang === "en"
+                        ? "Type an equipment tag (E-501), keyword, or phrase. Multi-word queries match every word (in any order); matching passages come back with context."
+                        : "Tapez un repère d'équipement (E-501), un mot-clé ou une phrase. Les requêtes multi-mots retrouvent tous les mots (dans l'ordre quelconque) ; les passages correspondants sont retournés avec leur contexte.")}
                 </p>
               </div>
+            </div>
+          )}
+
+          {/* Example queries */}
+          {!docResults && !docSearching && !docError && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-mono text-muted-foreground">{lang === "en" ? "Try:" : "Essayer :"}</span>
+              {EXAMPLE_QUERIES.map(example => (
+                <button
+                  key={example}
+                  type="button"
+                  onClick={() => { setDocQuery(example); void handleDocSearch(example); }}
+                  className="text-xs font-mono border border-orange-500/30 text-orange-500 hover:bg-orange-500/10 rounded-full px-3 py-1 transition-colors">
+                  {example}
+                </button>
+              ))}
             </div>
           )}
 
@@ -289,9 +386,15 @@ export default function Manuals() {
             <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
               <Loader2 className="h-8 w-8 animate-spin text-orange-500" />
               <p className="text-sm font-mono">
-                {lang === "en" ? `Scanning ${MANUALS.length} documents…` : `Analyse de ${MANUALS.length} documents…`}
+                {scopeId
+                  ? (lang === "en" ? `Scanning ${scopeId}…` : `Analyse de ${scopeId}…`)
+                  : (lang === "en" ? `Scanning ${MANUALS.length} documents…` : `Analyse de ${MANUALS.length} documents…`)}
               </p>
-              <p className="text-xs">This may take 10–20 seconds</p>
+              <p className="text-xs text-center max-w-sm leading-relaxed">
+                {lang === "en"
+                  ? "The first search downloads every document (10–20 s); later searches reuse a warm cache."
+                  : "La première recherche télécharge tous les documents (10–20 s) ; les suivantes réutilisent un cache chaud."}
+              </p>
             </div>
           )}
 
@@ -336,10 +439,39 @@ export default function Manuals() {
                 )}
               </div>
 
+              {/* Scan diagnostics from the endpoint */}
+              {docMeta && (
+                <p className={[
+                  "text-[11px] font-mono -mt-2",
+                  docMeta.failed > 0 ? "text-orange-500" : "text-muted-foreground",
+                ].join(" ")}>
+                  {lang === "en"
+                    ? `${docMeta.matched} of ${docMeta.total} documents matched · ${(docMeta.elapsedMs / 1000).toFixed(1)}s`
+                    : `${docMeta.matched} / ${docMeta.total} documents correspondent · ${(docMeta.elapsedMs / 1000).toFixed(1)}s`}
+                  {docMeta.cached > 0
+                    ? (lang === "en" ? ` · ${docMeta.cached} from cache` : ` · ${docMeta.cached} depuis le cache`)
+                    : ""}
+                  {docMeta.failed > 0
+                    ? (lang === "en" ? ` · ${docMeta.failed} unreachable` : ` · ${docMeta.failed} injoignable(s)`)
+                    : ""}
+                </p>
+              )}
+
               {/* Result cards */}
               {docResults.map(hit => (
                 <DocResult key={hit.id} hit={hit} query={docQuery} />
               ))}
+
+              {/* Empty results → same term against titles/categories */}
+              {docResults.length === 0 && (
+                <button
+                  type="button"
+                  onClick={fallBackToTitles}
+                  className="inline-flex items-center gap-2 text-xs font-mono border border-border rounded-lg px-3.5 py-2.5 text-muted-foreground hover:text-accent hover:border-accent/40 transition-colors">
+                  <Search className="h-3.5 w-3.5" />
+                  {lang === "en" ? "Search titles & categories instead" : "Rechercher dans les titres et catégories"}
+                </button>
+              )}
             </div>
           )}
         </div>

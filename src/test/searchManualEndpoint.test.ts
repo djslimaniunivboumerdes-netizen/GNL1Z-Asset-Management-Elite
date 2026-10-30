@@ -105,3 +105,71 @@ describe("manual search endpoint hardening", () => {
     expect(response.status).toBe(413);
   });
 });
+
+describe("manual search full-text behaviour", () => {
+  it("matches multi-word queries where every word appears (AND), returning highlight terms", async () => {
+    const m = MANUALS[2];
+    const xml = "<w:p><w:t>The propane refrigeration cycle cools the trains before liquefaction.</w:t></w:p>";
+    const fetchMock = vi.fn(async () => new Response(docxZip(xml), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await onRequestPost({
+      request: request({ query: "refrigeration propane", manuals: [{ id: m.id, title: m.title_en, driveId: m.drive_id }] }),
+      env: {},
+    });
+    const data = await response.json() as {
+      results: Array<{ id: string; count: number; snippets: string[]; terms: string[] }>;
+      meta: { total: number; matched: number; failed: number; cached: number; elapsedMs: number };
+    };
+
+    expect(data.results).toHaveLength(1);
+    expect(data.results[0].id).toBe(m.id);
+    expect(data.results[0].terms).toEqual(expect.arrayContaining(["propane", "refrigeration"]));
+    expect(data.results[0].snippets[0].toLowerCase()).toContain("propane");
+    expect(data.meta).toMatchObject({ total: 1, matched: 1, failed: 0, cached: 0 });
+    expect(data.meta.elapsedMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("reuses extracted text on repeat searches (warm cache) without re-downloading", async () => {
+    const m = MANUALS[3];
+    const xml = "<w:p><w:t>Feed separation drums operate at high pressure.</w:t></w:p>";
+    const fetchMock = vi.fn(async () => new Response(docxZip(xml), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await onRequestPost({
+      request: request({ query: "separation", manuals: [{ id: m.id, title: m.title_en, driveId: m.drive_id }] }),
+      env: {},
+    });
+    const firstData = await first.json() as { results: unknown[]; meta: { cached: number } };
+    expect(firstData.results).toHaveLength(1);
+    expect(firstData.meta.cached).toBe(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const second = await onRequestPost({
+      request: request({ query: "pressure", manuals: [{ id: m.id, title: m.title_en, driveId: m.drive_id }] }),
+      env: {},
+    });
+    const secondData = await second.json() as { results: unknown[]; meta: { cached: number } };
+    expect(secondData.results).toHaveLength(1);
+    expect(secondData.meta.cached).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // served from the warm cache
+  });
+
+  it("remembers failed downloads briefly instead of re-hitting Drive", async () => {
+    const m = MANUALS[4];
+    const fetchMock = vi.fn(async () => new Response("forbidden", { status: 403 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const body = { query: "valve", manuals: [{ id: m.id, title: m.title_en, driveId: m.drive_id }] };
+
+    const first = await onRequestPost({ request: request(body), env: {} });
+    const firstData = await first.json() as { results: unknown[]; meta: { failed: number } };
+    expect(firstData.results).toHaveLength(0);
+    expect(firstData.meta.failed).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const second = await onRequestPost({ request: request(body), env: {} });
+    const secondData = await second.json() as { meta: { failed: number } };
+    expect(secondData.meta.failed).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // negative cache absorbed the retry
+  });
+});
