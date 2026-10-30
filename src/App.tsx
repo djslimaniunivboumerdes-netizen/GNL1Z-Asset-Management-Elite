@@ -17,6 +17,7 @@ const About = lazy(() => import("./pages/About"));
 const EquipmentList = lazy(() => import("./pages/EquipmentList"));
 const EquipmentDetail = lazy(() => import("./pages/EquipmentDetail"));
 const DcsDirectory = lazy(() => import("./pages/DcsDirectory"));
+const Instruments = lazy(() => import("./pages/Instruments"));
 const DcsDetail = lazy(() => import("./pages/DcsDetail"));
 const Manuals = lazy(() => import("./pages/Manuals"));
 const SmartFlow = lazy(() => import("./pages/SmartFlow"));
@@ -55,6 +56,7 @@ const App = () => (
                     <Route path="/alerts" element={<AlertCenter />} />
                     <Route path="/dcs" element={<DcsDirectory />} />
                     <Route path="/dcs/:id" element={<DcsDetail />} />
+                    <Route path="/instruments" element={<Instruments />} />
                     <Route path="/manuals" element={<Manuals />} />
                   <Route path="/flow" element={<SmartFlow />} />
                   <Route path="/smart-flow" element={<SmartFlow />} />
