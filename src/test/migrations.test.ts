@@ -157,6 +157,25 @@ describe("row-level security", () => {
   it("protects the AI cache from the client entirely", () => {
     expect(/revoke\s+all\s+on\s+public\.ai_responses_cache\s+from\s+anon,\s*authenticated/i.test(liveSql)).toBe(true);
   });
+
+  it("removes TRUNCATE from every client role — TRUNCATE ignores RLS", () => {
+    // Found on staging: Supabase grants anon/authenticated TRUNCATE on every new
+    // public table, and TRUNCATE does not evaluate row-level security.
+    expect(/revoke\s+truncate\s+on\s+public\.%I\s+from\s+anon,\s*authenticated/i.test(liveSql)).toBe(true);
+  });
+
+  it("leaves anon with nothing but the PUBLIC document register", () => {
+    expect(/revoke\s+all\s+on\s+public\.%I\s+from\s+anon/i.test(liveSql)).toBe(true);
+    expect(/grant\s+select\s+on\s+public\.engineering_documents\s+to\s+anon/i.test(liveSql)).toBe(true);
+    expect(/revoke\s+insert,\s*update,\s*delete\s+on\s+public\.engineering_documents\s+from\s+anon/i.test(liveSql)).toBe(
+      true,
+    );
+  });
+
+  it("keeps the audit log append-only at the privilege level too", () => {
+    expect(/revoke\s+update,\s*delete\s+on\s+public\.audit_log\s+from\s+authenticated/i.test(liveSql)).toBe(true);
+    expect(/revoke\s+delete\s+on\s+public\.maintenance_logs\s+from\s+authenticated/i.test(liveSql)).toBe(true);
+  });
 });
 
 describe("role model", () => {

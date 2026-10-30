@@ -1,8 +1,12 @@
 # Database migrations
 
-**Status: the two migrations added on 2026-10-30 are written and syntax-checked
-but NOT applied to any project.** Applying them changes production data access
-and needs your authorisation.
+**Status: applied to staging, NOT applied to production.**
+
+All eleven migrations were applied in order to a restored staging project
+(`nwcpfsqsdjezkwkhxrqx`, PostgreSQL 17.6) on 2026-10-30 and verified there —
+see the verification table in `docs/SECURITY.md`. Production
+(`gdkqetzkhgllwbpmqmux`) has **not** been migrated: say the word and the same
+sequence runs there.
 
 ## Inventory and deployment order
 
@@ -64,6 +68,18 @@ failure is loud rather than silent.
 - `news_cache`: public read kept; writes revoked from clients.
 - `dcs_detected_instruments`, `rate_limit_counters`: client writes revoked.
 
+**Added after staging verification (sections 8 and 8b)**
+- `TRUNCATE` revoked from `anon` and `authenticated` on every public table —
+  TRUNCATE does not evaluate RLS, so leaving it granted turned any policy
+  mistake into a bulk data-loss event.
+- All privileges revoked from `anon` on every public table except
+  `engineering_documents`, where only SELECT is granted (documents classified
+  PUBLIC). Before this, `anon` held INSERT/UPDATE/DELETE everywhere and RLS was
+  the only control.
+- `DELETE` revoked from `authenticated` on `maintenance_logs`,
+  `equipment_notes` and `engineering_documents`; `UPDATE`/`DELETE` revoked on
+  `audit_log`. Grants now match policies exactly.
+
 **Data considerations**
 - `maintenance_logs.status` is set to `IMPORTED` for every existing row — no
   record is retrospectively approved.
@@ -102,6 +118,23 @@ Policies:
   public-URL fallback, so it works before *and* after the change.
 - Buckets are never dropped on rollback: dropping a bucket deletes its objects.
 
+## Verification results on staging (2026-10-30)
+
+```
+13/13 public tables have RLS enabled
+2     policies still contain "true" — both intended (news_cache public read, admin profile update)
+4/4   buckets declared with size and MIME limits
+true, true, false ← consume_rate_limit('staging-probe', 2, '1 minute')
+DRAFT → SUBMITTED      accepted
+SUBMITTED → APPROVED   rejected (role cannot approve)
+SUBMITTED → CLOSED     rejected (illegal transition)
+audit_log rows: INSERT, UPDATE, DELETE — none for the rejected transitions
+anon privileges in the whole schema: SELECT on engineering_documents only
+```
+
+Not verified: runtime RLS as `anon`/`authenticated` (no users or tokens were
+created on staging), storage uploads, and the Edge Function.
+
 ## Verification after applying
 
 ```sql
@@ -122,8 +155,13 @@ select public.consume_rate_limit('smoke-test', 1, interval '1 minute');
 
 ## Not done
 
-- No migration has been run against any project.
-- `disable_signup` and `password_min_length` in the Auth configuration are
-  unchanged (changing them affects live users and needs authorisation).
-- The `uri_allow_list` (Auth redirect URLs) still contains entries from earlier
-  work and needs pruning.
+- **Production is not migrated.** Staging only.
+- `password_min_length` is still 6 and `password_hibp_enabled` is false: neither
+  is exposed by the management connector, so they must be set in the Supabase
+  dashboard. `disable_signup` and the redirect allow-list were hardened with
+  authorisation.
+- The document migration (uploading the 46 RESTRICTED files) has **not** run:
+  this environment has no network path to `*.supabase.co` (verified: SSL connect
+  error), so the upload step cannot be executed from here. Everything else is
+  ready — `scripts/upload-restricted-documents.mjs`, the private bucket, and the
+  register. Run the script locally, then the public copies can be deleted.
