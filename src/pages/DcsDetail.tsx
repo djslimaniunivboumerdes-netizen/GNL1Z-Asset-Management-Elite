@@ -9,10 +9,21 @@ import { getEquipmentByTag, EQUIPMENT } from "@/data";
 import type { Equipment } from "@/data";
 import { getTagsForPanel, getTagIndex } from "@/data/dcs_tags";
 import { getEquipmentTagsFromDcsTags } from "@/data/dcs_equipment_map";
+import { findInstrument } from "@/lib/instrumentIndex";
+import { describeInstrument } from "@/lib/instrumentTags";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { StorageImg } from "@/components/StorageImg";
 import NotFound from "./NotFound";
+
+/** Tooltip for a detected tag: what the instrument is and what it belongs to. */
+function instrumentHint(tag: string, lang: string): string {
+  const entry = findInstrument(tag);
+  if (!entry) return tag;
+  const meaning = describeInstrument(entry.parsed, lang === "fr" ? "fr" : "en");
+  const equipment = entry.equipment.slice(0, 3).map(eq => eq.diag).join(", ");
+  return equipment ? `${tag} — ${meaning} (${equipment})` : `${tag} — ${meaning}`;
+}
 
 export default function DcsDetail() {
   const { id = "" } = useParams();
@@ -38,6 +49,7 @@ export default function DcsDetail() {
   const [loading, setLoading] = useState(false);
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgError, setImgError] = useState(false);
+  const [showLegend, setShowLegend] = useState(false);
 
   useEffect(() => {
     if (!panel) return;
@@ -249,12 +261,66 @@ export default function DcsDetail() {
                         ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 shadow-sm"
                         : "border-border bg-card text-muted-foreground hover:border-slate-600 shadow-sm"
                   }`}
-                  title={hasMapping ? (lang === "en" ? "Mapped to equipment" : "Relié à un équipement") : (lang === "en" ? "No equipment mapping" : "Non relié")}
+                  title={instrumentHint(tg, lang)}
                 >
                   {tg}
                 </span>
               );
             })}
+          </div>
+        )}
+        {tags !== null && tags.length > 0 && (
+          <div className="space-y-3">
+            <button
+              type="button"
+              onClick={() => setShowLegend(v => !v)}
+              aria-pressed={showLegend}
+              className="text-xs font-mono uppercase tracking-wider border border-border rounded-xl px-3 py-2 text-muted-foreground hover:text-cyan-400 hover:border-cyan-500/40 transition-colors"
+            >
+              {showLegend
+                ? (lang === "en" ? "Hide instrument meanings" : "Masquer la signification")
+                : (lang === "en" ? "What do these tags mean?" : "Que signifient ces tags ?")}
+            </button>
+
+            {showLegend && (
+              <div className="overflow-x-auto rounded-2xl border border-border bg-secondary/30">
+                <table className="w-full text-left text-xs font-mono">
+                  <thead className="text-[10px] uppercase tracking-widest text-muted-foreground border-b border-border">
+                    <tr>
+                      <th scope="col" className="px-4 py-2">{lang === "en" ? "Tag" : "Tag"}</th>
+                      <th scope="col" className="px-4 py-2">{lang === "en" ? "Meaning" : "Signification"}</th>
+                      <th scope="col" className="px-4 py-2">{lang === "en" ? "Unit" : "Unité"}</th>
+                      <th scope="col" className="px-4 py-2">{lang === "en" ? "Related equipment" : "Équipement lié"}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {aiTags.map(tg => {
+                      const entry = findInstrument(tg);
+                      return (
+                        <tr key={tg} className="hover:bg-secondary/40">
+                          <td className="px-4 py-2 font-bold text-cyan-700 dark:text-cyan-400 whitespace-nowrap">
+                            <Link to={`/instruments?q=${encodeURIComponent(tg)}`} className="hover:underline">{tg}</Link>
+                          </td>
+                          <td className="px-4 py-2 text-foreground/80">
+                            {entry ? describeInstrument(entry.parsed, lang === "fr" ? "fr" : "en") : "—"}
+                          </td>
+                          <td className="px-4 py-2 text-muted-foreground whitespace-nowrap">
+                            {entry?.unit && entry.parsed.unitCode
+                              ? `${entry.parsed.unitCode} · ${lang === "en" ? entry.unit.en : entry.unit.fr}`
+                              : "—"}
+                          </td>
+                          <td className="px-4 py-2 text-muted-foreground">
+                            {entry && entry.equipment.length > 0
+                              ? entry.equipment.slice(0, 4).map(eq => eq.diag).join(", ")
+                              : (lang === "en" ? "not mapped" : "non mappé")}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
       </div>

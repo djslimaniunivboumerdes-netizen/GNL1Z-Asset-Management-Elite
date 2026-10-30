@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { LayoutDashboard, Info, Database, Cpu, GitBranch, BookOpen, User, Workflow, Newspaper, FileText, ShieldAlert, CalendarClock } from "lucide-react";
+import { LayoutDashboard, Info, Database, Cpu, GitBranch, BookOpen, User, Workflow, Newspaper, FileText, ShieldAlert, CalendarClock, Gauge } from "lucide-react";
 import sonatrachLogo from "@/assets/sonatrach-logo.png";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
@@ -20,6 +20,7 @@ export function AppSidebar() {
     { title: t("testSchedule"), url: "/test-schedule", icon: CalendarClock },
     { title: t("fastAlerts"),   url: "/alerts",        icon: ShieldAlert },
     { title: t("dcs"), url: "/dcs", icon: Cpu },
+    { title: t("instruments"), url: "/instruments", icon: Gauge },
     { title: t("smartFlow"), url: "/smart-flow", icon: GitBranch },
     { title: t("pidLibrary"), url: "/pids", icon: FileText },
     { title: t("news"), url: "/news", icon: Newspaper },

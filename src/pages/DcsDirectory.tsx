@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Fuse from "fuse.js";
-import { Cpu, Search, ArrowRight, Tag as TagIcon } from "lucide-react";
+import { Cpu, Search, ArrowRight, Tag as TagIcon, Gauge } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,8 @@ import { useI18n } from "@/contexts/I18nContext";
 import { DCS_PANELS, DCS_SECTIONS, getDcsPanel } from "@/data/dcs_panels";
 import { getAllTagsSorted, getTagIndex } from "@/data/dcs_tags";
 import { StorageImg } from "@/components/StorageImg";
+import { findInstrument } from "@/lib/instrumentIndex";
+import { describeInstrument } from "@/lib/instrumentTags";
 
 function DcsThumb({ storagePath, alt }: { storagePath: string; alt: string }) {
   return (
@@ -97,6 +99,13 @@ export default function DcsDirectory() {
         </div>
 
         <Dialog open={tagsOpen} onOpenChange={setTagsOpen}>
+          <Button asChild variant="outline" className="h-12 bg-secondary border-border text-foreground hover:text-foreground rounded-xl py-5 px-5 font-mono text-xs gap-2 cursor-pointer shadow-md">
+            <Link to="/instruments">
+              <Gauge className="h-4 w-4 text-cyan-700 dark:text-cyan-400" />
+              {lang === "en" ? "Instrument Finder" : "Recherche d'Instruments"}
+            </Link>
+          </Button>
+
           <DialogTrigger asChild>
             <Button variant="outline" className="h-12 bg-secondary border-border text-foreground hover:text-foreground rounded-xl py-5 px-5 font-mono text-xs gap-2 cursor-pointer shadow-md">
               <TagIcon className="h-4 w-4 text-cyan-700 dark:text-cyan-400" />
@@ -138,22 +147,29 @@ export default function DcsDirectory() {
                 {filteredTags.map((tag) => {
                   const panels = tagIndex[tag] ?? [];
                   const firstPanel = getDcsPanel(panels[0]);
+                  const decoded = findInstrument(tag);
                   return (
                     <button
                       key={tag}
                       onClick={() => goToTag(tag)}
                       title={
-                        firstPanel
-                          ? lang === "en"
-                            ? firstPanel.title_en
-                            : firstPanel.title_fr
-                          : ""
+                        [
+                          firstPanel ? (lang === "en" ? firstPanel.title_en : firstPanel.title_fr) : "",
+                          decoded?.equipment.length
+                            ? (lang === "en" ? "Related: " : "Lié : ") + decoded.equipment.slice(0, 3).map(eq => eq.diag).join(", ")
+                            : "",
+                        ].filter(Boolean).join(" · ")
                       }
-                      className="px-3 py-1.5 rounded-xl border border-border bg-card hover:bg-cyan-500 hover:text-slate-950 text-cyan-700 dark:text-cyan-400 font-mono text-xs font-bold transition-all shadow-sm cursor-pointer"
+                      className="px-3 py-1.5 rounded-xl border border-border bg-card hover:bg-cyan-500 hover:text-slate-950 text-cyan-700 dark:text-cyan-400 font-mono text-xs font-bold transition-all shadow-sm cursor-pointer text-left"
                     >
-                      {tag}
+                      <span>{tag}</span>
                       {panels.length > 1 && (
                         <span className="ml-1.5 opacity-60 bg-secondary px-1.5 py-0.5 rounded-full text-[10px]">{panels.length}</span>
+                      )}
+                      {decoded && (
+                        <span className="block text-[10px] font-normal opacity-70">
+                          {describeInstrument(decoded.parsed, lang === "fr" ? "fr" : "en")}
+                        </span>
                       )}
                     </button>
                   );
