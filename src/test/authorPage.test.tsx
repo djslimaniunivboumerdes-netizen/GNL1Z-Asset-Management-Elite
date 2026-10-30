@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { I18nProvider } from "@/contexts/I18nContext";
@@ -73,5 +73,52 @@ describe("Author profile page", () => {
     expect(screen.getByText("Intégrité des actifs")).toBeInTheDocument();
     expect(screen.getByText("Fiches équipements")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /options d'installation/i })).toBeInTheDocument();
+  });
+
+  it("summarizes install benefits as chips above the platform steps", () => {
+    renderAuthor();
+    expect(screen.getByText("Offline-ready")).toBeInTheDocument();
+    expect(screen.getByText("Auto-updates")).toBeInTheDocument();
+    expect(screen.getByText("No app store")).toBeInTheDocument();
+    // Manual step cards remain visible while not installed.
+    expect(screen.getAllByText(/Add to Home Screen/).length).toBeGreaterThan(0);
+  });
+
+  it("shows the installed banner and hides manual steps in standalone display mode", () => {
+    const realMatchMedia = window.matchMedia;
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
+      ...(realMatchMedia.call(window, query) as object),
+      matches: query.includes("standalone"),
+    }) as MediaQueryList);
+    renderAuthor();
+    expect(screen.getByText(/You already have GNL1Z installed/)).toBeInTheDocument();
+    expect(screen.getByText(/display-mode: standalone detected/)).toBeInTheDocument();
+    expect(screen.queryByText(/Go to/)).toBeNull(); // install steps hidden
+    vi.restoreAllMocks();
+  });
+
+  it("offers one-tap install on beforeinstallprompt, then flips to the installed banner", async () => {
+    const user = userEvent.setup();
+    renderAuthor();
+    expect(screen.queryByRole("button", { name: /install gnl1z/i })).toBeNull();
+
+    const promptSpy = vi.fn().mockResolvedValue(undefined);
+    const event = new Event("beforeinstallprompt") as Event & {
+      prompt: () => Promise<void>;
+      userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+    };
+    event.prompt = promptSpy;
+    event.userChoice = Promise.resolve({ outcome: "accepted" });
+    act(() => { window.dispatchEvent(event); });
+
+    const installBtn = await screen.findByRole("button", { name: /install gnl1z/i });
+    expect(screen.getByText(/One-tap install available/)).toBeInTheDocument();
+    await user.click(installBtn);
+
+    // Accepted → appinstalled state: banner replaces the CTA and step cards.
+    expect(await screen.findByText(/You already have GNL1Z installed/)).toBeInTheDocument();
+    expect(promptSpy).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: /install gnl1z/i })).toBeNull();
+    expect(screen.queryByText(/Add to Home Screen/)).toBeNull();
   });
 });

@@ -10,6 +10,8 @@ import "@fontsource/jetbrains-mono/latin-400.css";
 import "@fontsource/jetbrains-mono/latin-500.css";
 import "./index.css";
 import { initSync } from "./lib/sync";
+// Capture PWA install events from app boot so they are never missed on other routes.
+import "./lib/pwaInstall";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
 try {
