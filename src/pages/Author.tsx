@@ -1,7 +1,8 @@
-import { Mail, Linkedin, ExternalLink, Award, Copy, Check, Smartphone, Download, ArrowUpRight } from "lucide-react";
+import { Mail, Linkedin, ExternalLink, Award, Copy, Check, Smartphone, Download, ArrowUpRight, CheckCircle, RefreshCw, Zap } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/contexts/I18nContext";
+import { usePwaInstall, promptInstall } from "@/lib/pwaInstall";
 import { Link } from "react-router-dom";
 import { useState } from "react";
 import type { ReactNode } from "react";
@@ -40,7 +41,18 @@ const BIO = {
 export default function Author() {
   const { t, lang } = useI18n();
   const [copied, setCopied] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const { installed, canInstall } = usePwaInstall();
   const origin = appOrigin();
+
+  const handleInstall = async () => {
+    setInstalling(true);
+    try {
+      await promptInstall();
+    } finally {
+      setInstalling(false);
+    }
+  };
 
   const copy = async () => {
     let ok = false;
@@ -174,13 +186,45 @@ export default function Author() {
         <h2 className="text-2xl font-display font-bold mb-1">
           {lang === "en" ? "Install on your phone" : "Installer sur votre téléphone"}
         </h2>
-        <p className="text-sm text-muted-foreground mb-5 leading-relaxed">
+        <p className="text-sm text-muted-foreground mb-3 leading-relaxed">
           {lang === "en"
             ? "GNL1Z is a Progressive Web App. Install it directly from your browser — no app store required for internal Sonatrach use."
             : "GNL1Z est une Progressive Web App. Installez-la directement depuis votre navigateur, sans app store pour usage interne Sonatrach."}
         </p>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        {/* Install benefits */}
+        <ul className="flex flex-wrap gap-2 mb-5" aria-label={L(lang, "Install benefits", "Avantages d'installation")}>
+          <BenefitChip icon={Zap}>{L(lang, "Offline-ready", "Prêt hors-ligne")}</BenefitChip>
+          <BenefitChip icon={RefreshCw}>{L(lang, "Auto-updates", "Mises à jour auto")}</BenefitChip>
+          <BenefitChip icon={Smartphone}>{L(lang, "No app store", "Sans app store")}</BenefitChip>
+        </ul>
+
+        {/* One-tap install (Chromium fires beforeinstallprompt) */}
+        {canInstall && (
+          <div className="border border-accent/40 bg-accent/5 rounded-xl p-5 mb-4 flex flex-wrap items-center gap-4">
+            <div className="flex-1 min-w-[220px]">
+              <div className="font-display font-bold">
+                {L(lang, "One-tap install available", "Installation en un clic disponible")}
+              </div>
+              <div className="text-xs text-muted-foreground mt-0.5">
+                {L(
+                  lang,
+                  "Your browser can install GNL1Z directly — no manual steps needed.",
+                  "Votre navigateur peut installer GNL1Z directement — aucune étape manuelle requise.",
+                )}
+              </div>
+            </div>
+            <Button onClick={handleInstall} disabled={installing} className="gap-2">
+              <Download className="h-4 w-4" />
+              {installing ? L(lang, "Installing…", "Installation…") : L(lang, "Install GNL1Z", "Installer GNL1Z")}
+            </Button>
+          </div>
+        )}
+
+        {installed ? (
+          <InstalledBanner lang={lang} />
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
 
           {/* Android */}
           <div className="border border-border rounded-xl bg-card overflow-hidden hover:border-emerald-500/40 hover:shadow-lg transition-all">
@@ -195,11 +239,11 @@ export default function Author() {
                   <div className="text-xs text-muted-foreground">Chrome · Add to Home Screen</div>
                 </div>
               </div>
-              <ol className="text-xs text-muted-foreground space-y-1 pl-1 leading-relaxed">
-                <li>1. Open <strong>Chrome</strong> on your Android phone</li>
-                <li>2. Go to <span className="font-mono text-xs text-foreground/70 break-all">{origin}</span></li>
-                <li>3. Tap ⋮ → <strong>"Add to Home Screen"</strong> → Add</li>
-                <li>4. Or generate a signed APK with PWABuilder ↓</li>
+              <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside leading-relaxed">
+                <li>Open <strong>Chrome</strong> on your Android phone</li>
+                <li>Go to <span className="font-mono text-xs text-foreground/70 break-all">{origin}</span></li>
+                <li>Tap ⋮ → <strong>Install app</strong>{lang === "en" ? " (or \"Add to Home Screen\")" : " (ou « Sur l'écran d'accueil »)"}</li>
+                <li>Confirm — the Sonatrach icon appears on your home screen</li>
               </ol>
               <div className="flex gap-2 pt-1">
                 <a href={`https://www.pwabuilder.com/?url=${origin}`} target="_blank" rel="noopener noreferrer"
@@ -229,11 +273,11 @@ export default function Author() {
                   <div className="text-xs text-muted-foreground">Safari · Add to Home Screen</div>
                 </div>
               </div>
-              <ol className="text-xs text-muted-foreground space-y-1 pl-1 leading-relaxed">
-                <li>1. Open <strong>Safari</strong> on iPhone or iPad</li>
-                <li>2. Go to <span className="font-mono text-xs text-foreground/70 break-all">{origin}</span></li>
-                <li>3. Tap Share ⬆ → <strong>"Add to Home Screen"</strong> → Add</li>
-                <li>4. The Sonatrach icon appears on your home screen</li>
+              <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside leading-relaxed">
+                <li>Open <strong>Safari</strong> on iPhone or iPad</li>
+                <li>Go to <span className="font-mono text-xs text-foreground/70 break-all">{origin}</span></li>
+                <li>Tap Share ⬆ → <strong>"Add to Home Screen"</strong> → Add</li>
+                <li>Confirm — the Sonatrach icon appears on your home screen</li>
               </ol>
               <div className="flex gap-2 pt-1">
                 <a href={origin} target="_blank" rel="noopener noreferrer"
@@ -250,6 +294,7 @@ export default function Author() {
             </div>
           </div>
         </div>
+        )}
 
         {/* Google Drive folder */}
         <a href="https://drive.google.com/drive/folders/1bvY4hC9Zep4lD-CI-eFyubwUWiSwpBbL" target="_blank" rel="noopener noreferrer"
@@ -274,6 +319,40 @@ export default function Author() {
           <ArrowUpRight className="h-4 w-4" />
           {L(lang, "All install options & releases — Download page", "Toutes les options d'installation — page Téléchargement")}
         </Link>
+      </div>
+    </div>
+  );
+}
+
+function BenefitChip({ icon: Icon, children }: { icon: LucideIcon; children: ReactNode }) {
+  return (
+    <li className="inline-flex items-center gap-1.5 border border-border bg-card text-foreground/70 font-mono text-xs uppercase tracking-wider px-3 py-1.5 rounded-full">
+      <Icon className="h-3.5 w-3.5 text-accent" />
+      {children}
+    </li>
+  );
+}
+
+function InstalledBanner({ lang }: { lang: "en" | "fr" }) {
+  return (
+    <div className="border border-emerald-500/40 bg-emerald-500/5 rounded-xl p-5 mb-4 flex items-start gap-3">
+      <div className="h-9 w-9 rounded-lg bg-emerald-500/10 grid place-items-center shrink-0">
+        <CheckCircle className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+      </div>
+      <div className="min-w-0">
+        <div className="font-display font-bold">
+          {L(lang, "You already have GNL1Z installed", "GNL1Z est déjà installé")}
+        </div>
+        <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+          {L(
+            lang,
+            "You're running it as an installed app. Updates are applied automatically — close and reopen it if a version looks outdated.",
+            "Vous l'exécutez en application installée. Les mises à jour s'appliquent automatiquement — fermez et rouvrez-la si une version semble obsolète.",
+          )}
+        </p>
+        <div className="text-[10px] font-mono uppercase tracking-widest text-emerald-600 dark:text-emerald-400 mt-2">
+          {L(lang, "display-mode: standalone detected", "display-mode: standalone détecté")}
+        </div>
       </div>
     </div>
   );
