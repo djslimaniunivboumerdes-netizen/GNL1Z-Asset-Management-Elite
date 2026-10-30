@@ -1,182 +1,247 @@
 #!/usr/bin/env node
 /**
- * Restricted-document migration.
+ * Restricted-document migration — CLI.
  *
- * Moves the documents classified RESTRICTED (P&IDs and PFDs today) out of the
- * public static folder and into the private `restricted-documents` bucket, then
- * writes the register rows for public.engineering_documents.
+ * Moves every document classified RESTRICTED (46 P&ID and PFD files today,
+ * 17.5 MB) out of public/ and into the private `restricted-documents` bucket,
+ * registers each one in public.engineering_documents, and — only once every
+ * file has been checksum-verified — can move the originals out of public/ to an
+ * archive directory you choose.
  *
- * Safety properties, in order:
- *  1. Nothing happens without --upload. The default is a dry run.
- *  2. Every upload is verified: the object is downloaded again and its sha256
- *     compared with the local file. An unverified upload is reported as failed.
- *  3. The register row records the sha256, so a later audit can prove the bytes
- *     in Storage are the bytes that were on disk.
- *  4. Local files are never deleted here. Deletion is a separate, explicit step
- *     (--delete-public) that refuses to run unless every upload in this batch
- *     verified in the same run.
+ * Order of operations, and why:
+ *   1. --upload     push each object, then download it back and compare sha256.
+ *   2. --verify     re-download every object and compare again (safe to re-run).
+ *   3. --register   write the engineering_documents row (idempotent).
+ *   4. --archive    MOVE the public copies out of the served folder. Refuses to
+ *                   run unless every file verified in this same run. Nothing is
+ *                   ever unlinked; --restore puts every file back.
+ *
+ * Nothing is uploaded, registered or moved unless the matching flag is present.
  *
  * Usage
- *   node scripts/upload-restricted-documents.mjs                        # dry run
- *   node scripts/upload-restricted-documents.mjs --out register.json    # write rows
- *   SUPABASE_SERVICE_ROLE_KEY=… node scripts/upload-restricted-documents.mjs --upload
+ *   node scripts/upload-restricted-documents.mjs                      # dry run
+ *   node scripts/upload-restricted-documents.mjs --limit 1 --upload   # rehearse
+ *   node scripts/upload-restricted-documents.mjs --upload --register
+ *   node scripts/upload-restricted-documents.mjs --verify             # re-check
+ *   node scripts/upload-restricted-documents.mjs --verify --archive-dir ../gnl1z-originals
+ *   node scripts/upload-restricted-documents.mjs --restore            # put them back
  *
- * Requires network egress to <project>.supabase.co and a service-role key
- * (server-side only — never a VITE_ variable).
+ * Environment (see docs/DOCUMENT_MIGRATION.md for the full runbook)
+ *   SUPABASE_URL                  https://<project>.supabase.co
+ *   SUPABASE_SERVICE_ROLE_KEY     server-side only, never a VITE_ variable
+ *
+ * Requires outbound access to <project>.supabase.co. The service-role key
+ * bypasses RLS: treat it as a production credential, keep it out of the shell
+ * history, and do not commit it.
  */
-import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "node:fs";
-import { join, relative } from "node:path";
+import { existsSync, mkdirSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import {
+  buildPlan,
+  preflight,
+  registerOne,
+  runPool,
+  summarise,
+  uploadAndVerify,
+  verifyOne,
+} from "./lib/document-migration.mjs";
 
 const ROOT = process.cwd();
-const PUBLIC_DIR = join(ROOT, "public");
-const BUCKET = "restricted-documents";
-const EXTENSIONS = /\.(pdf|png|jpe?g|webp)$/i;
+const DEFAULT_MANIFEST = join(ROOT, "document-migration-manifest.json");
 
-/** Mirrors src/lib/documentAccess.ts — keep the two in step. */
-const CLASSES = [
-  { dir: "pids", kind: "pid", classification: "RESTRICTED", target: "pids" },
-  { dir: "pfd", kind: "pfd", classification: "RESTRICTED", target: "pfd" },
-];
-
-const args = new Set(process.argv.slice(2));
-const flag = (name, fallback = null) => {
-  const index = process.argv.indexOf(name);
-  return index > -1 && process.argv[index + 1] ? process.argv[index + 1] : fallback;
+const argv = process.argv.slice(2);
+const has = (name) => argv.includes(name);
+const value = (name, fallback = null) => {
+  const index = argv.indexOf(name);
+  return index > -1 && argv[index + 1] && !argv[index + 1].startsWith("--") ? argv[index + 1] : fallback;
 };
-const wantUpload = args.has("--upload");
-const wantDelete = args.has("--delete-public");
-const outFile = flag("--out");
+
+const wantUpload = has("--upload");
+const wantVerify = has("--verify");
+const wantRegister = has("--register");
+const wantRestore = has("--restore");
+const wantPreflight = has("--preflight");
+const archiveDir = value("--archive-dir");
+const manifestFile = resolve(value("--out", DEFAULT_MANIFEST));
+const limit = Number(value("--limit", "0")) || Infinity;
+const concurrency = Math.max(1, Math.min(8, Number(value("--concurrency", "4")) || 4));
+
 const projectUrl = (process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? "").replace(/\/$/, "");
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 
-function sha256(buffer) {
-  return createHash("sha256").update(buffer).update("").digest("hex");
+const mib = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+
+/** The manifest is the evidence file: what moved, where, and its hash. */
+function writeManifest(items) {
+  const payload = {
+    generatedAt: new Date().toISOString(),
+    projectUrl: projectUrl.replace(/\/\/([^@]+)@/, "//***@"),
+    bucket: "restricted-documents",
+    summary: summarise(items),
+    documents: items.map((item) => ({
+      publicPath: item.publicPath,
+      storagePath: item.storagePath,
+      docType: item.docType,
+      bytes: item.bytes,
+      sha256: item.sha256,
+      verified: item.verified,
+      remoteSha256: item.remoteSha256,
+      registered: item.registered,
+      archived: item.archived,
+      archivedPath: item.archivedPath ?? null,
+      drawingNo: item.drawingNo ?? null,
+      error: item.error ?? null,
+    })),
+  };
+  writeFileSync(manifestFile, `${JSON.stringify(payload, null, 2)}\n`);
+  return payload;
 }
 
-/** drawing number and sheet title, when the P&ID index knows them. */
-function pidMeta(fileName) {
-  const indexPath = join(ROOT, "src", "data", "pid_index.json");
-  if (!existsSync(indexPath)) return {};
-  const index = JSON.parse(readFileSync(indexPath, "utf8"));
-  const base = fileName.replace(/\.pdf$/i, "");
-  const sheet = (index.sheets ?? []).find((s) => (s.file ?? "").replace(/^\/?pids\//, "").replace(/\.pdf$/i, "") === base);
-  return sheet ? { drawing_no: sheet.drawing ?? null, title_hint: sheet.title ?? null } : {};
-}
-
-const plan = [];
-for (const entry of CLASSES) {
-  const dir = join(PUBLIC_DIR, entry.dir);
-  if (!existsSync(dir)) continue;
-  for (const name of readdirSync(dir).sort()) {
-    if (!EXTENSIONS.test(name)) continue;
-    const full = join(dir, name);
-    const bytes = readFileSync(full);
-    const meta = entry.kind === "pid" ? pidMeta(name) : {};
-    plan.push({
-      localPath: `/${entry.dir}/${name}`,
-      absolutePath: full,
-      kind: entry.kind,
-      classification: entry.classification,
-      storageBucket: BUCKET,
-      storagePath: `${entry.target}/${name}`,
-      title: name.replace(/\.[^.]+$/, ""),
-      drawingNo: meta.drawing_no ?? null,
-      bytes: bytes.length,
-      sha256: sha256(bytes),
-      verified: false,
-      uploaded: false,
-      error: null,
-    });
+function loadManifest() {
+  if (!existsSync(manifestFile)) {
+    console.error(`\n✖ No manifest at ${manifestFile}. Run with --out <file> when you migrate.\n`);
+    process.exit(2);
   }
+  return JSON.parse(readFileSync(manifestFile, "utf8"));
 }
 
-if (!wantUpload) {
-  const total = plan.reduce((sum, item) => sum + item.bytes, 0);
-  console.log(`\nDry run — ${plan.length} RESTRICTED documents, ${(total / 1024 / 1024).toFixed(1)} MB`);
-  console.log(`Target bucket: ${BUCKET} (private)\n`);
-  for (const item of plan.slice(0, 15)) {
-    console.log(`  ${item.storagePath}  ${(item.bytes / 1024).toFixed(0).padStart(6)} KB  ${item.drawingNo ?? "—"}`);
+function requireCredentials() {
+  if (projectUrl && serviceKey) return true;
+  console.error("\n✖ Missing credentials. Both are required:\n");
+  console.error("    export SUPABASE_URL=https://<project>.supabase.co");
+  console.error("    export SUPABASE_SERVICE_ROLE_KEY=<service-role key>   # server-side only\n");
+  console.error("  Read the key from Dashboard → Project Settings → API. It bypasses RLS:\n" + "  never prefix it with VITE_, never paste it into the repo, never commit it.\n");
+  return false;
+}
+
+const plan = buildPlan({ root: ROOT, publicDir: join(ROOT, "public"), limit });
+
+if (plan.length === 0) {
+  console.log("\nNo RESTRICTED documents found under public/. Nothing to do.\n");
+  process.exit(0);
+}
+
+console.log(`\nRestricted-document migration — ${plan.length} files, ${mib(plan.reduce((s, i) => s + i.bytes, 0))}`);
+console.log(`Target: private bucket "restricted-documents" (pids/, pfd/)`);
+
+// ---------------------------------------------------------------- restore ----
+if (wantRestore) {
+  const manifest = loadManifest();
+  let moved = 0;
+  let skipped = 0;
+  for (const doc of manifest.documents) {
+    if (!doc.archivedPath || !existsSync(doc.archivedPath)) {
+      skipped += 1;
+      continue;
+    }
+    const destination = join(ROOT, "public", doc.publicPath.replace(/^\//, ""));
+    mkdirSync(dirname(destination), { recursive: true });
+    renameSync(doc.archivedPath, destination);
+    moved += 1;
   }
-  if (plan.length > 15) console.log(`  … and ${plan.length - 15} more`);
-  console.log(
-    wantUpload ? "" : "\nNothing was uploaded. Re-run with --upload (and SUPABASE_SERVICE_ROLE_KEY) to migrate.\n",
-  );
+  console.log(`\nRestored ${moved} file(s) to public/. ${skipped} already in place or missing.\n`);
+  process.exit(0);
 }
 
-async function upload(item) {
-  const url = `${projectUrl}/storage/v1/object/${BUCKET}/${item.storagePath.split("/").map(encodeURIComponent).join("/")}`;
-  const body = readFileSync(item.absolutePath);
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      apikey: serviceKey,
-      Authorization: `Bearer ${serviceKey}`,
-      "Content-Type": item.localPath.endsWith(".pdf") ? "application/pdf" : "image/*",
-      "x-upsert": "true",
-      "cache-control": "3600",
-    },
-    body,
-  });
-  if (!response.ok) throw new Error(`upload ${response.status}: ${(await response.text()).slice(0, 200)}`);
-
-  // Verify: read the object back and compare hashes. An upload is only "done"
-  // when the bytes in Storage match the bytes on disk.
-  const back = await fetch(url, { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } });
-  if (!back.ok) throw new Error(`verify ${back.status}`);
-  const remoteHash = sha256(Buffer.from(await back.arrayBuffer()));
-  if (remoteHash !== item.sha256) throw new Error(`sha256 mismatch ${remoteHash.slice(0, 12)} != ${item.sha256.slice(0, 12)}`);
-  item.uploaded = true;
+// ------------------------------------------------------------------ dry run --
+if (!wantUpload && !wantVerify && !wantRegister && !wantPreflight) {
+  for (const item of plan.slice(0, 12)) {
+    console.log(`  ${item.storagePath.padEnd(52)} ${String(Math.round(item.bytes / 1024)).padStart(6)} KB  ${item.drawingNo ?? "—"}`);
+  }
+  if (plan.length > 12) console.log(`  … and ${plan.length - 12} more`);
+  console.log("\nDry run — nothing was uploaded, registered or moved.");
+  console.log("  --upload      push to Storage and verify each object by hash");
+  console.log("  --verify      re-download and compare hashes (no upload)");
+  console.log("  --register    write the engineering_documents rows");
+  console.log("  --archive-dir <outside public/>   move the public copies out, after verification");
+  console.log("  --restore     put the archived copies back into public/\n");
+  writeManifest(plan);
+  console.log(`Manifest (dry run) written to ${relative(ROOT, manifestFile) || manifestFile}\n`);
+  process.exit(0);
 }
 
+if (!requireCredentials()) process.exit(2);
+
+if (wantPreflight) {
+  const check = await preflight({ projectUrl, serviceKey });
+  console.log("\nPreflight:");
+  console.log(`  bucket restricted-documents : ${check.bucket.exists ? (check.bucket.isPublic ? "EXISTS but PUBLIC — fix before migrating" : "exists, private") : check.bucket.error}`);
+  console.log(`  engineering_documents table : ${check.register.reachable ? "reachable" : check.register.error}`);
+  if (!check.bucket.exists || check.bucket.isPublic !== false || !check.register.reachable) process.exit(1);
+  console.log("\nReady to migrate.\n");
+  process.exit(0);
+}
+
+// ------------------------------------------------------------------- upload --
 if (wantUpload) {
-  if (!projectUrl || !serviceKey) {
-    console.error("\n✖ Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (server-side only).\n");
+  console.log(`\nUploading with concurrency ${concurrency}…`);
+  await runPool(plan, async (item) => {
+    await uploadAndVerify(item, { projectUrl, serviceKey });
+    console.log(`  ✓ ${item.storagePath}`);
+  }, concurrency);
+}
+
+// ------------------------------------------------------------------- verify --
+if (wantVerify || wantUpload) {
+  console.log("\nVerifying every object by checksum…");
+  await runPool(plan, async (item) => {
+    const result = await verifyOne(item, { projectUrl, serviceKey });
+    if (!result.verified) throw new Error(result.error ?? "verification failed");
+  }, concurrency);
+}
+
+// ----------------------------------------------------------------- register --
+if (wantRegister) {
+  console.log("\nRegistering in public.engineering_documents…");
+  await runPool(plan, async (item) => {
+    const result = await registerOne(item, { projectUrl, serviceKey });
+    if (!result.registered) throw new Error(result.error ?? "registration failed");
+  }, concurrency);
+}
+
+const summary = summarise(plan);
+console.log(`\n  uploaded   ${summary.uploaded}/${summary.total}`);
+console.log(`  verified   ${summary.verified}/${summary.total}`);
+console.log(`  registered ${summary.registered}/${summary.total}`);
+for (const failure of summary.failures) console.log(`  FAILED     ${failure.storagePath}: ${failure.error}`);
+
+// ------------------------------------------------------------------ archive --
+if (archiveDir) {
+  const target = isAbsolute(archiveDir) ? archiveDir : resolve(ROOT, archiveDir);
+  const publicDir = join(ROOT, "public");
+  const insidePublic = target === publicDir || target.startsWith(publicDir + "/");
+
+  if (insidePublic) {
+    console.error(`\n✖ Refusing to archive into ${target}: it is inside public/ and would still be served.\n`);
+    process.exit(2);
+  }
+  if (summary.verified !== summary.total || summary.failures.length > 0) {
+    console.error(`\n✖ Refusing to archive: only ${summary.verified}/${summary.total} files verified in this run.`);
+    console.error("  Every file must be verified before the public copies move. Re-run with --verify.\n");
     process.exit(1);
   }
-  await Promise.all(
-    plan.map(async (item) => {
-      try {
-        await upload(item);
-      } catch (error) {
-        item.error = error instanceof Error ? error.message : String(error);
-      }
-    }),
-  );
 
-  const ok = plan.filter((item) => item.uploaded).length;
-  const failed = plan.filter((item) => item.error);
-  console.log(`\nUploaded and verified: ${ok}/${plan.length}`);
-  for (const item of failed) console.log(`  FAILED ${item.storagePath}: ${item.error}`);
-
-  if (wantDelete) {
-    if (failed.length) {
-      console.error("\n✖ Refusing to delete public copies: not every upload verified in this run.\n");
-      process.exit(1);
+  mkdirSync(target, { recursive: true });
+  for (const item of plan) {
+    const destination = join(target, item.publicPath.replace(/^\//, ""));
+    mkdirSync(dirname(destination), { recursive: true });
+    if (existsSync(destination) && statSync(destination).size > 0) {
+      // Already archived once: keep the first copy, do not overwrite it.
+      item.archived = true;
+      item.archivedPath = destination;
+      continue;
     }
-    const { unlinkSync } = await import("node:fs");
-    for (const item of plan) unlinkSync(item.absolutePath);
-    console.log(`Deleted ${plan.length} public copies from public/. (git history still contains them.)`);
+    renameSync(item.absolutePath, destination);
+    item.archived = true;
+    item.archivedPath = destination;
   }
+  console.log(`\nArchived ${plan.length} original(s) to ${target}`);
+  console.log("  They are moved, not deleted. To put them back: node scripts/upload-restricted-documents.mjs --restore");
+  console.log("  Removing them from the working tree does NOT remove them from git history.\n");
 }
 
-if (outFile && (wantUpload || !wantUpload)) {
-  const rows = plan.map((item) => ({
-    doc_type: item.kind === "pid" ? "P_AND_ID" : "PFD",
-    title: item.title,
-    drawing_no: item.drawingNo,
-    classification: item.classification,
-    storage_bucket: item.storageBucket,
-    storage_path: item.storagePath,
-    public_path: item.localPath,
-    extraction_method: null,
-    verified: false,
-    notes: `migrated ${new Date().toISOString().slice(0, 10)}; sha256 ${item.sha256.slice(0, 16)}…; ${item.bytes} bytes`,
-  }));
-  writeFileSync(outFile, JSON.stringify(rows, null, 2));
-  console.log(`\nWrote ${rows.length} register rows to ${outFile}`);
-}
+const manifest = writeManifest(plan);
+console.log(`Manifest written to ${relative(ROOT, manifestFile) || manifestFile}`);
+console.log(`  verified ${manifest.summary.verified}/${manifest.summary.total}, registered ${manifest.summary.registered}/${manifest.summary.total}, archived ${manifest.summary.archived}\n`);
 
-if (!wantUpload && !outFile) {
-  console.log("Add --out register.json to write the engineering_documents rows.\n");
-}
+process.exit(manifest.summary.failures.length > 0 ? 1 : 0);

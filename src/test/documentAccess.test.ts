@@ -3,6 +3,7 @@ import {
   DOCUMENT_CLASSES,
   accessNotice,
   canAccessDocument,
+  canManageDocuments,
   classifyDocument,
   type DocumentDescriptor,
 } from "@/lib/documentAccess";
@@ -51,16 +52,45 @@ describe("access decisions", () => {
     expect(canAccessDocument(photo, anonymous)).toBe(false);
   });
 
-  it("offers signed-in staff everything except what their role excludes", () => {
-    expect(canAccessDocument(pid, engineer)).toBe(true);
-    expect(canAccessDocument(photo, engineer)).toBe(true);
-    expect(canAccessDocument(pid, { authenticated: true, role: "operations_viewer" })).toBe(true);
+  it("offers the drawings to every plant role, auditor excluded", () => {
+    // Two tiers: a plant user reads the drawings, an administrator manages them.
+    for (const role of [
+      "administrator",
+      "reliability_engineer",
+      "mechanical_engineer",
+      "process_engineer",
+      "instrumentation_engineer",
+      "maintenance_technician",
+      "operations_viewer",
+    ] as const) {
+      expect(canAccessDocument(pid, { authenticated: true, role }), role).toBe(true);
+      expect(canAccessDocument(photo, { authenticated: true, role }), role).toBe(true);
+    }
+    // An auditor sees the audit trail, not the drawings (enforced by RLS too).
+    expect(canAccessDocument(pid, { authenticated: true, role: "auditor" })).toBe(false);
+  });
+
+  it("lets only the administrator manage documents", () => {
+    expect(canManageDocuments({ authenticated: true, role: "administrator" })).toBe(true);
+    for (const role of [
+      "reliability_engineer",
+      "mechanical_engineer",
+      "process_engineer",
+      "instrumentation_engineer",
+      "maintenance_technician",
+      "operations_viewer",
+      "auditor",
+    ] as const) {
+      expect(canManageDocuments({ authenticated: true, role }), role).toBe(false);
+    }
+    expect(canManageDocuments({ authenticated: false, role: "anonymous" })).toBe(false);
   });
 
   it("explains a refusal instead of showing an empty panel", () => {
     expect(accessNotice(pid, anonymous, "en")).toMatch(/signed-in staff/i);
     expect(accessNotice(pid, anonymous, "fr")).toMatch(/connect/i);
     expect(accessNotice(pid, engineer, "en")).toBeNull();
+    expect(accessNotice(pid, { authenticated: true, role: "auditor" }, "en")).toMatch(/auditor/i);
   });
 
   it("defaults an unknown kind to restricted, never to public", () => {

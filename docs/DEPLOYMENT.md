@@ -55,12 +55,21 @@ supabase functions deploy detect-dcs-instruments
 
 **Order for this release**
 
-1. `supabase db push` (applies `…20261030000001` then `…20261030000002`).
+1. `supabase db push` — applies, in filename order:
+
+   | Migration | What it does |
+   |---|---|
+   | `…20261030000001_security_rls_hardening.sql` | `app_role` enum, role helpers, least-privilege RLS on every table, maintenance lifecycle, append-only audit log, rate limiter, `engineering_documents` |
+   | `…20261030000002_storage_buckets_and_policies.sql` | declares the four buckets with size/MIME limits and their policies |
+   | `…20261030000003_two_tier_access_model.sql` | administrator manages official data and documents; every plant user creates alerts and maintenance records; auditor reads only |
 2. `supabase functions deploy detect-dcs-instruments`.
 3. Deploy the frontend (it works before or after — signed URLs fall back to
    public URLs — but the fallback is only needed until step 1 lands).
 4. Sign in as an administrator and review `profiles.role_key` (the backfill is a
-   heuristic over the legacy free-text `role`).
+   heuristic over the legacy free-text `role`). **Do not skip this**: with the
+   two-tier model, whoever holds `administrator` is the only person who can
+   amend the test-date register, manage documents and approve maintenance
+   records.
 
 **Auth configuration** (dashboard): add every origin that must sign in to
 `uri_allow_list` — production, `*.pages.dev`, and any preview host — and remove

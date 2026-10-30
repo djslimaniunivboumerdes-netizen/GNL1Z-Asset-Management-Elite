@@ -67,30 +67,141 @@ idempotent "drop then re-create" pattern in the hardening migrations reads as
 
 | Gap | Why | Consequence |
 |---|---|---|
-| RLS as `anon`/`authenticated` at runtime | No users or JWTs were created on staging | Policies and privileges are verified; end-to-end authorization is not |
-| Storage policies | Buckets and policies were created on staging; no upload/download was performed | Upload, signed URL and owner-scoped paths are untested against a live bucket |
-| Document migration | This environment has no egress to `*.supabase.co` | 46 RESTRICTED files are still public; `scripts/upload-restricted-documents.mjs` is ready to run locally |
-| Edge Function behaviour | Requires a deployed function and secrets | Validation and sanitisation are unit-tested; HTTP/auth paths are not |
-| End-to-end (10-step spec flow) | No browser harness in the stack | Not automated; must be run manually against staging |
+| Storage upload/download against a live bucket | Needs a signed-URL round trip from a networked client; the sandbox has no egress to `*.supabase.co` | Bucket configuration and policies are verified by SQL; no object has been uploaded or fetched |
+| Document migration | Same reason — the upload must run on your machine | 46 RESTRICTED files are still public; `scripts/upload-restricted-documents.mjs` and `docs/DOCUMENT_MIGRATION.md` are ready |
+| Edge Function behaviour | Requires a deployed function and secrets (`GEMINI_API_KEY`) | Validation, sanitisation and error mapping are unit-tested; HTTP/auth paths are not |
+| Browser flow (sign-in, photo upload, offline queue, PDF rendering) | No browser harness in the stack and no egress | Steps 1, 2, 3, 8, 9 and 10 of the plan below are manual |
 | Offline/reconnect on a real device | Not automatable here | Covered by unit tests with fake-indexeddb only |
 | Visual/accessibility audit | No headless browser | Manual |
 | Load/performance budgets | Only build-size measurement | Bundle size is tracked; runtime metrics are not |
 
-## Manual test plan for staging (the E2E the spec asks for)
+Solved since the previous pass: **RLS behaviour at runtime is no longer a gap.**
+It is verified by impersonating each role inside a transaction (see below), not
+by minting JWTs.
 
-1. Administrator invites a Reliability Engineer; the new user cannot change
-   their own role (expect a permission error).
-2. Engineer searches instrument tag `FT-1503` → finder shows ISA meaning,
-   equipment and the panels it appears on.
-3. From the equipment page, open the linked P&ID → the drawing opens with the
-   sizes the index read, flagged *not verified*.
-4. Create a maintenance log as a technician → status `DRAFT`; submit → `SUBMITTED`.
-5. Sign in as the same technician and try to approve → refused.
-6. Sign in as a Reliability Engineer → approve → `APPROVED`, `reviewed_by` set.
-7. Query `public.audit_log` → one row per transition, actor and role recorded.
-8. Go offline, create a log and a photo, come back online → queue flushes once,
-   no duplicate rows, photo path `<tag>/<user_id>/<uuid>.webp`.
-9. Sign out → P&ID pages, maintenance history and photos are not readable;
-   the assistant still answers from the local knowledge base.
-10. Call `detect-dcs-instruments` without a token → 401; with a token twice in
-    a minute → 429 after the quota; with a token and a bad `storage_path` → 400.
+---
+
+## Staging results — two-tier access model (2026-10-30)
+
+Run against `nwcpfsqsdjezkwkhxrqx` (`gnl1z-staging`) after applying
+`20261030000003_two_tier_access_model.sql`. Each probe impersonates a real
+account inside a transaction that is rolled back:
+
+```sql
+begin;
+set local role 'authenticated';
+set local request.jwt.claim.sub   = '<user uuid>';
+set local request.jwt.claim.role  = 'authenticated';
+-- … the operation under test …
+rollback;
+```
+
+Four staging accounts exist for this (administrator, maintenance_technician,
+operations_viewer, auditor). `P0001` = refused by a trigger (clear message),
+`42501` = refused by RLS/privileges.
+
+### Maintenance technician
+
+| Action | Expected | Result |
+|---|---|---|
+| Create an alert | allowed | **ALLOWED** |
+| Create a maintenance/test record | allowed | **ALLOWED** |
+| Submit own draft record (DRAFT → SUBMITTED) | allowed | **ALLOWED** |
+| Review/approve a submitted record | refused | **DENIED P0001** — "Only an administrator can review, approve or close a maintenance record." |
+| Change the official test-date register | refused | **DENIED 42501** |
+| Add an engineering document | refused | **DENIED 42501** |
+| Read a RESTRICTED document | allowed | **ALLOWED** (1 row) |
+
+### Operations viewer (previously could not raise anything at all)
+
+| Action | Expected | Result |
+|---|---|---|
+| Create an alert | allowed | **ALLOWED** |
+| Create a maintenance/test record | allowed | **ALLOWED** |
+| Edit a colleague's record | no effect | **rows changed = 0** (RLS filtered it, no error) |
+| Change the official test-date register | refused | **DENIED 42501** |
+| Add an engineering document | refused | **DENIED 42501** |
+| Read a RESTRICTED document | allowed | **ALLOWED** (1 row) |
+
+### Administrator
+
+| Action | Expected | Result |
+|---|---|---|
+| Create an alert | allowed | **ALLOWED** |
+| Change the official test-date register | allowed | **ALLOWED** |
+| Add an engineering document | allowed | **ALLOWED** |
+| Review a submitted record | allowed | **ALLOWED** |
+| Approve a record the administrator performed himself | refused | **DENIED P0001** — "You cannot review or approve a record you performed." |
+| Delete an alert | allowed | **ALLOWED** (1 row) |
+
+### Auditor
+
+| Action | Expected | Result |
+|---|---|---|
+| Create an alert | refused | **DENIED 42501** |
+| Create a maintenance/test record | refused | **DENIED 42501** |
+| Read a RESTRICTED document | hidden | **0 rows** |
+| Read the audit log | allowed | **ALLOWED** (5 rows) |
+
+### Anonymous
+
+| Action | Expected | Result |
+|---|---|---|
+| Read a RESTRICTED document | hidden | **0 rows** |
+| Read a PUBLIC document | allowed | **1 row** |
+| Read maintenance records | refused | **DENIED 42501** |
+| Create an alert | refused | **DENIED 42501** |
+
+**27 probes, 27 expected outcomes, 0 surprises** — with one deliberate design
+consequence, recorded below.
+
+### What this changed, and the trade-off
+
+Writes used to be gated on `public.can_write()` (every engineer and technician,
+but *not* operators). Approvals were gated on `public.can_approve()` (five
+engineering roles). The plant asked for two levels, so now:
+
+- official data and documents → **administrator only**;
+- alerts and maintenance/test records → **every plant user**;
+- **approvals → administrator only**.
+
+That last line is a real change of working practice: a reliability engineer can
+no longer approve a maintenance record. If you want a reviewer tier, it is one
+predicate (`public.is_admin()` → a `reviewer` role check) — say the word and it
+will be added as a third tier rather than quietly left as it is.
+
+---
+
+## Manual test plan for staging — status
+
+The database half is done (above). The browser half cannot be automated here:
+no headless browser and no egress to `*.supabase.co`. Run these against the
+preview or your own machine, signed in as the staging accounts.
+
+| # | Step | Status |
+|---|---|---|
+| 1 | Administrator changes a role; a user cannot change their own | **NOT RUN** — needs a browser. The database half is verified: the trigger refuses with "Only an administrator can change a user role." |
+| 2 | Instrument finder (`FT-1503`) shows ISA meaning, equipment, panels | **NOT RUN** — component logic is unit-tested; must be eyeballed once |
+| 3 | Equipment page → linked P&ID opens with its sizes, flagged not verified | **NOT RUN** — the resolution path is unit-tested (`documentRegistry.test.ts`); the local fallback serves 26 of 44 drawings, the other 18 open from Drive |
+| 4 | Technician creates a log (DRAFT) and submits it (SUBMITTED) | **VERIFIED IN SQL** (technician probes 2 and 3) |
+| 5 | Same technician tries to approve → refused | **VERIFIED IN SQL** (DENIED P0001) |
+| 6 | Administrator approves → APPROVED, `reviewed_by` set | **VERIFIED IN SQL** (admin probe 4) |
+| 7 | `audit_log` records one row per transition | **VERIFIED IN SQL** — 5 audit rows exist on staging from the lifecycle probes |
+| 8 | Offline: create a log and a photo, reconnect, queue flushes once | **NOT RUN** — needs a browser and a service worker; unit-tested with fake-indexeddb |
+| 9 | Signed out: P&IDs, history and photos unreadable; assistant still answers | **VERIFIED IN SQL** for data (anonymous probes); the UI half is **NOT RUN** |
+| 10 | `detect-dcs-instruments`: 401 without a token, 429 after quota, 400 on a bad path | **NOT RUN** — the function is not deployed (no `GEMINI_API_KEY`); validation is unit-tested |
+
+### Staging accounts (for the manual run)
+
+`admin.staging@gnl1z.test`, `technician.staging@gnl1z.test`,
+`operator.staging@gnl1z.test`, `auditor.staging@gnl1z.test` — four accounts
+created on staging only, `mailer_autoconfirm` is on there so no mailbox is
+needed. Set a password in the dashboard (Authentication → Users → … → Reset /
+send password) or create your own; role is on `public.profiles.role_key`.
+
+To delete them when you are finished:
+
+```sql
+delete from public.profiles where email like '%.staging@gnl1z.test';
+delete from auth.users       where email like '%.staging@gnl1z.test';
+```

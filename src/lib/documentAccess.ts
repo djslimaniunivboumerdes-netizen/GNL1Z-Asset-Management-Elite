@@ -104,6 +104,12 @@ export function classifyDocument(kind: DocumentKind): DocumentClass {
  *
  * Advisory only: Storage and Postgres make the real decision, and a signed URL
  * is only issued to a session the server accepts.
+ *
+ * Two tiers, matching the RLS policies in
+ * supabase/migrations/20261030000003_two_tier_access_model.sql:
+ *   - reading a document needs a session and a plant role (an auditor reads the
+ *     audit trail, not the drawings);
+ *   - managing one needs the administrator role.
  */
 export function canAccessDocument(
   doc: DocumentDescriptor,
@@ -112,7 +118,18 @@ export function canAccessDocument(
   const classification = doc.classification ?? classifyDocument(doc.kind);
   if (classification === "PUBLIC") return true;
   if (!actor.authenticated) return false;
-  return classification === "INTERNAL" || actor.role !== "anonymous";
+  return actor.role !== "anonymous" && actor.role !== "auditor";
+}
+
+/**
+ * Whether the caller may add, replace, verify or remove a document.
+ *
+ * The database is the authority — public.engineering_documents and the
+ * restricted-documents bucket accept writes from public.is_admin() only — so
+ * this only decides which controls the UI shows.
+ */
+export function canManageDocuments(actor: { authenticated: boolean; role: AccessRole }): boolean {
+  return actor.authenticated && actor.role === "administrator";
 }
 
 /** Signed URL for a migrated document, or the static path while it is public. */
@@ -137,6 +154,11 @@ export function accessNotice(
     return lang === "en"
       ? "This document is restricted to signed-in staff."
       : "Ce document est réservé au personnel connecté.";
+  }
+  if (actor.role === "auditor") {
+    return lang === "en"
+      ? "An auditor account reads the audit trail, not the drawings."
+      : "Un compte auditeur consulte la piste d'audit, pas les plans.";
   }
   return lang === "en"
     ? "Your role does not include access to this document. Ask an administrator."

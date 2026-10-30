@@ -241,3 +241,68 @@ describe("operational safety", () => {
     for (const migration of hardening) expect(migration.sql).toMatch(/ROLLBACK/);
   });
 });
+
+describe("two-tier access model", () => {
+  const policy = (table: string, name: string) => policies.find((p) => p.table === table && p.name === name);
+
+  it("defines the plant-user predicate and excludes the auditor from it", () => {
+    expect(/create\s+or\s+replace\s+function\s+public\.is_plant_user\(\)/i.test(liveSql)).toBe(true);
+    expect(/role_key\s+<>\s+'auditor'/i.test(liveSql)).toBe(true);
+  });
+
+  it("restricts official equipment data to the administrator", () => {
+    // The test-date register is the plant's official record of when equipment
+    // was last tested: no plant user may amend it.
+    const write = policy("equipment_test_dates", "test_dates_write_admin");
+    expect(write, "equipment_test_dates has no administrator-only policy").toBeTruthy();
+    expect(write?.body).toMatch(/public\.is_admin\(\)/);
+    expect(write?.body).not.toMatch(/public\.can_write\(\)/);
+  });
+
+  it("restricts the document register and its bucket to the administrator", () => {
+    for (const name of ["eng_docs_write_admin", "eng_docs_verify_admin"]) {
+      const write = policy("engineering_documents", name);
+      expect(write, `${name} is missing`).toBeTruthy();
+      expect(write?.body).toMatch(/public\.is_admin\(\)/);
+    }
+    // The private bucket accepts uploads from administrators only.
+    expect(/bucket_id\s*=\s*'restricted-documents'[\s\S]*?public\.is_admin\(\)/i.test(liveSql)).toBe(true);
+  });
+
+  it("lets every plant user raise an alert and record maintenance", () => {
+    for (const [table, name] of [
+      ["alerts", "alerts_insert_plant"],
+      ["fast_alerts", "fast_alerts_insert_plant"],
+      ["maintenance_logs", "logs_insert_own"],
+    ] as const) {
+      const insert = policy(table, name);
+      expect(insert, `${table}: ${name} is missing`).toBeTruthy();
+      expect(insert?.body, `${table}: ${name} must use is_plant_user()`).toMatch(/public\.is_plant_user\(\)/);
+      // And it must be their own row.
+      expect(insert?.body).toMatch(/auth\.uid\(\)/);
+    }
+  });
+
+  it("makes maintenance approval an administrator decision", () => {
+    expect(/Only an administrator can review, approve or close a maintenance record/i.test(liveSql)).toBe(true);
+    // Nobody approves their own work, administrator included.
+    expect(/You cannot review or approve a record you performed/i.test(liveSql)).toBe(true);
+  });
+
+  it("lets a plant user amend only their own records", () => {
+    for (const [table, name] of [
+      ["alerts", "alerts_update_author_or_admin"],
+      ["fast_alerts", "fast_alerts_update_author_or_admin"],
+      ["maintenance_logs", "logs_update_own_or_admin"],
+    ] as const) {
+      const update = policy(table, name);
+      expect(update?.body, `${table}: ${name}`).toMatch(/auth\.uid\(\)/);
+    }
+  });
+
+  it("keeps one row per stored object so the migration can be re-run", () => {
+    expect(/create\s+unique\s+index\s+if\s+not\s+exists\s+eng_docs_storage_path_key\s+on\s+public\.engineering_documents\s*\(\s*storage_path\s*\)/i.test(liveSql)).toBe(
+      true,
+    );
+  });
+});
