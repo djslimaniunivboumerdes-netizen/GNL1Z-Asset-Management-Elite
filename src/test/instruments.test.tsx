@@ -3,6 +3,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { I18nProvider } from "@/contexts/I18nContext";
+import { AuthProvider } from "@/contexts/AuthContext";
 import Instruments from "@/pages/Instruments";
 import DcsDirectory from "@/pages/DcsDirectory";
 import DcsDetail from "@/pages/DcsDetail";
@@ -176,9 +177,12 @@ describe("Instrument decoding on the DCS screens", () => {
     render(
       <MemoryRouter initialEntries={["/dcs/decarbonation-01"]}>
         <I18nProvider>
-          <Routes>
-            <Route path="/dcs/:id" element={<DcsDetail />} />
-          </Routes>
+          {/* DcsDetail gating of AI detection depends on the session. */}
+          <AuthProvider>
+            <Routes>
+              <Route path="/dcs/:id" element={<DcsDetail />} />
+            </Routes>
+          </AuthProvider>
         </I18nProvider>
       </MemoryRouter>,
     );

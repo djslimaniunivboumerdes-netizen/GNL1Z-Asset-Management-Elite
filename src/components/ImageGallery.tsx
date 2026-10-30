@@ -4,6 +4,7 @@ import { supabase, isSupabaseConfigured } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useI18n } from "@/contexts/I18nContext";
 import { PhotoUpload } from "./PhotoUpload";
+import { storageUrl } from "@/lib/storageUrl";
 import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -35,7 +36,21 @@ export function ImageGallery({ tag }: { tag: string }) {
     finally { setLoading(false); }
   }, [tag]);
   useEffect(() => { void load(); }, [load]);
-  const urlOf = (path: string) => supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+  // Photos are private objects: resolve a short-lived signed URL (falls back to
+  // the public URL while a bucket is still public).
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      const entries = await Promise.all(
+        images.map(async (image) => [image.file_path, await storageUrl(BUCKET, image.file_path)] as const),
+      );
+      if (!active) return;
+      setUrls(Object.fromEntries(entries.filter(([, url]) => Boolean(url)) as Array<[string, string]>));
+    })();
+    return () => { active = false; };
+  }, [images]);
+  const urlOf = (path: string) => urls[path] ?? (isSupabaseConfigured ? supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl : "");
 
   const deleteImage = async () => {
     if (!deleteTarget || deleting || deleteTarget.uploaded_by !== user?.id) return;

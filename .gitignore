@@ -27,3 +27,11 @@ dist-ssr
 *.tsbuildinfo
 playwright-report
 test-results
+
+# Environment files: never commit real credentials.
+.env
+.env.*
+!.env.example
+
+# Local extraction working directories (OCR output can be large)
+pid_work/

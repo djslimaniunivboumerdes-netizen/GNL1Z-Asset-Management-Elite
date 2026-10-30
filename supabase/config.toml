@@ -1,7 +1,27 @@
-project_id = "usaagqmwdnzgutmpuorz"
+# Supabase local configuration
+#
+# project_id is intentionally left empty.
+#
+# The deployed application talks to project `gdkqetzkhgllwbpmqmux` (see
+# src/components/StorageImg.ts and src/data/dcs_panels.ts), while this file used
+# to pin a different reference. Pushing migrations from a stale link would apply
+# them to the wrong database, so the link must be made explicitly:
+#
+#     supabase link --project-ref gdkqetzkhgllwbpmqmux     # production
+#     supabase link --project-ref <staging-ref>            # staging
+#
+# Do not commit a production reference here; keep it in the operator's local
+# environment so `supabase db push` can never target production by accident.
+project_id = ""
 
 [functions.detect-dcs-instruments]
-verify_jwt = false
+# JWT verification is ON. The function reads plant documents and writes to the
+# instrument register; it must never be callable with the public anon key.
+verify_jwt = true
+entrypoint = "./index.ts"
 
-[functions.news-feed]
-verify_jwt = false
+# [functions.news-feed]
+# This block was removed: no such function exists in this repository (news is
+# served by the Cloudflare Function functions/api/news.ts). Any Edge Function
+# deployed under that name elsewhere must set verify_jwt = true and rate-limit
+# per user before it is re-added here.
