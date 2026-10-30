@@ -3,12 +3,15 @@ import {
   BookOpen, FileText, ExternalLink, Search,
   ScanText, ChevronDown, ChevronUp, Loader2,
   AlertCircle, X, FileSearch, CheckCircle2,
+  History, Copy, Check,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/contexts/I18nContext";
 import { MANUALS, driveDocViewUrl } from "@/data/manuals";
+import { highlightParts } from "@/lib/textMatch";
+import { copyToClipboard } from "@/lib/clipboard";
 
 const categoryColors: Record<string, string> = {
   Process:       "border-accent/40 text-accent",
@@ -23,6 +26,25 @@ const categoryColors: Record<string, string> = {
 
 // Sample queries for in-document search (equipment tag + domain keywords).
 const EXAMPLE_QUERIES = ["E-501", "propane", "flare", "shutdown"];
+
+// Recent in-document queries — kept locally so an operator can re-run the
+// searches that matter without retyping (and they hit the warm cache).
+const RECENT_KEY = "gnl1z-manual-searches";
+const RECENT_MAX = 6;
+
+function loadRecent(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string").slice(0, RECENT_MAX) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecent(terms: string[]) {
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify(terms.slice(0, RECENT_MAX))); } catch { /* private mode */ }
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface DocHit {
@@ -43,29 +65,33 @@ interface SearchMeta {
 }
 
 // ─── Highlight matching text ─────────────────────────────────────────────────
-// Deterministic: `split` with ONE capture group puts every match at an odd
-// index (the old `re.test()` loop advanced lastIndex and skipped matches).
-// `terms` come from the server (every query/tag variant that actually hit),
-// so a query of "E501" still highlights "E-501" inside the snippet.
+// Accent-insensitive and deterministic: `terms` come from the server (query
+// variants + the surface forms as written in the document), so "mesure" marks
+// "mesuré" and "E501" marks "E-501". Every occurrence is marked — the previous
+// `re.test()` loop advanced lastIndex and skipped every other hit.
 function highlight(text: string, terms: string[]): React.ReactNode[] {
-  const clean = [...new Set(terms.map(t => t.trim()).filter(Boolean))];
-  if (!clean.length) return [text];
-  const escaped = clean
-    .map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-    .sort((a, b) => b.length - a.length); // longest first: "E-501" beats "E"
-  const re = new RegExp(`(${escaped.join("|")})`, "gi");
-  return text.split(re).map((part, i) =>
-    i % 2 === 1
-      ? <mark key={i} className="bg-orange-500/30 text-orange-300 rounded px-0.5 not-italic font-semibold">{part}</mark>
-      : part,
+  return highlightParts(text, terms).map((part, i) =>
+    part.match
+      ? <mark key={i} className="bg-orange-500/30 text-orange-300 rounded px-0.5 not-italic font-semibold">{part.text}</mark>
+      : <span key={i}>{part.text}</span>,
   );
 }
 
 // ─── Collapsible result card ──────────────────────────────────────────────────
-function DocResult({ hit, query }: { hit: DocHit; query: string }) {
+function DocResult({ hit, query, lang }: { hit: DocHit; query: string; lang: "en" | "fr" }) {
   const [open, setOpen] = useState(true);
+  const [copied, setCopied] = useState(false);
   const m = MANUALS.find(x => x.id === hit.id);
   const terms = hit.terms?.length ? hit.terms : [query];
+
+  const copyExcerpts = async () => {
+    const body = hit.snippets.map(s => `• ${s.replace(/\s+/g, " ").trim()}`).join("\n");
+    const ok = await copyToClipboard(`${hit.id} — ${hit.title}\n${body}`);
+    if (ok) {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    }
+  };
 
   return (
     <div className="border border-border rounded-xl bg-card overflow-hidden">
@@ -97,7 +123,20 @@ function DocResult({ hit, query }: { hit: DocHit; query: string }) {
             </p>
           ))}
           {m && (
-            <div className="px-4 py-3 flex justify-end">
+            <div className="px-4 py-3 flex items-center justify-end gap-4">
+              <button
+                type="button"
+                onClick={() => void copyExcerpts()}
+                aria-label={lang === "en" ? `Copy excerpts from ${hit.id}` : `Copier les extraits de ${hit.id}`}
+                className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground font-mono transition-colors"
+              >
+                {copied
+                  ? <><Check className="h-3.5 w-3.5 text-success" />{lang === "en" ? "Copied" : "Copié"}</>
+                  : <><Copy className="h-3.5 w-3.5" />{lang === "en" ? "Copy excerpts" : "Copier les extraits"}</>}
+              </button>
+              <span role="status" className="sr-only">
+                {copied ? (lang === "en" ? `Excerpts from ${hit.id} copied` : `Extraits de ${hit.id} copiés`) : ""}
+              </span>
               <a
                 href={driveDocViewUrl(m.drive_id)}
                 target="_blank"
@@ -105,7 +144,7 @@ function DocResult({ hit, query }: { hit: DocHit; query: string }) {
                 className="inline-flex items-center gap-1.5 text-[11px] text-accent hover:text-accent/80 font-mono transition-colors"
               >
                 <ExternalLink className="h-3.5 w-3.5" />
-                Open document
+                {lang === "en" ? "Open document" : "Ouvrir le document"}
               </a>
             </div>
           )}
@@ -131,6 +170,7 @@ export default function Manuals() {
   const [docMeta,     setDocMeta]     = useState<SearchMeta | null>(null);
   // When set, only this manual is downloaded + scanned (fast scoped search).
   const [scopeId,     setScopeId]     = useState<string | null>(null);
+  const [recent,      setRecent]      = useState<string[]>(() => loadRecent());
   const abortRef = useRef<AbortController | null>(null);
 
   // Filtered list for metadata search
@@ -180,6 +220,9 @@ export default function Manuals() {
       const data = await res.json() as { results: DocHit[]; meta?: SearchMeta };
       setDocResults(data.results ?? []);
       setDocMeta(data.meta ?? null);
+      const next = [term, ...recent.filter(r => r.toLowerCase() !== term.toLowerCase())].slice(0, RECENT_MAX);
+      setRecent(next);
+      saveRecent(next);
     } catch (err: unknown) {
       if ((err as Error).name !== "AbortError") {
         setDocError((err as Error).message ?? "Search failed");
@@ -195,6 +238,11 @@ export default function Manuals() {
     setDocError(null);
     setDocMeta(null);
     setDocQuery("");
+  };
+
+  const forgetRecent = () => {
+    setRecent([]);
+    saveRecent([]);
   };
 
   // Card action: jump into full-text mode scoped to one document.
@@ -324,7 +372,10 @@ export default function Manuals() {
               <Input
                 value={docQuery}
                 onChange={e => setDocQuery(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter") void handleDocSearch(); }}
+                onKeyDown={e => {
+                  if (e.key === "Enter") void handleDocSearch();
+                  if (e.key === "Escape") clearDocSearch();
+                }}
                 placeholder={lang === "en" ? "e.g.  E-501  or  propane compressor…" : "ex.  E-501  ou  compresseur propane…"}
                 className="pl-9 h-11 border-orange-500/40 focus-visible:ring-orange-500/40 font-mono"
               />
@@ -378,6 +429,30 @@ export default function Manuals() {
                   {example}
                 </button>
               ))}
+            </div>
+          )}
+
+          {/* Recent queries — warm-cache friendly one-click re-runs */}
+          {recent.length > 0 && !docSearching && (
+            <div className="flex flex-wrap items-center gap-2">
+              <History className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-xs font-mono text-muted-foreground">{lang === "en" ? "Recent:" : "Recent :"}</span>
+              {recent.map(term => (
+                <button
+                  key={term}
+                  type="button"
+                  onClick={() => { setDocQuery(term); void handleDocSearch(term); }}
+                  className="text-xs font-mono border border-border text-muted-foreground hover:text-orange-500 hover:border-orange-500/40 rounded-full px-3 py-1 transition-colors">
+                  {term}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={forgetRecent}
+                aria-label={lang === "en" ? "Clear recent searches" : "Effacer les recherches récentes"}
+                className="text-xs font-mono text-muted-foreground hover:text-foreground underline underline-offset-2">
+                {lang === "en" ? "clear" : "effacer"}
+              </button>
             </div>
           )}
 
@@ -459,7 +534,7 @@ export default function Manuals() {
 
               {/* Result cards */}
               {docResults.map(hit => (
-                <DocResult key={hit.id} hit={hit} query={docQuery} />
+                <DocResult key={hit.id} hit={hit} query={docQuery} lang={lang} />
               ))}
 
               {/* Empty results → same term against titles/categories */}

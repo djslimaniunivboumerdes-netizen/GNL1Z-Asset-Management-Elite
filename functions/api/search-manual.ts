@@ -11,6 +11,7 @@
 // cannot be used to pull arbitrary Google Drive documents.
 
 import { MANUALS } from "../../src/data/manuals";
+import { buildSnippets, findMatches, foldText, preferBoundary, type FoldedText, type TextMatch } from "../../src/lib/textMatch";
 
 interface ManualMeta { id: string; title: string; driveId: string }
 interface SearchHit  { id: string; title: string; driveId: string; count: number; snippets: string[]; terms: string[] }
@@ -133,29 +134,32 @@ export async function onRequestPost(ctx: { request: Request; env?: Record<string
 // not hammer Drive on every keystroke-level retry.
 const TEXT_TTL_MS  = 10 * 60_000;
 const FAIL_TTL_MS  = 60_000;
-const textCache = new Map<string, { text: string; at: number }>();
+const textCache = new Map<string, { text: string; folded: FoldedText; at: number }>();
 const failCache = new Map<string, { at: number }>();
 
 type TextOutcome =
-  | { ok: true;  text: string; cached: boolean }
+  | { ok: true;  text: string; folded: FoldedText; cached: boolean }
   | { ok: false; cached: false };
 
 async function getManualText(driveId: string): Promise<TextOutcome> {
   const hit = textCache.get(driveId);
-  if (hit && Date.now() - hit.at < TEXT_TTL_MS) return { ok: true, text: hit.text, cached: true };
+  if (hit && Date.now() - hit.at < TEXT_TTL_MS) return { ok: true, text: hit.text, folded: hit.folded, cached: true };
 
   const fail = failCache.get(driveId);
   if (fail && Date.now() - fail.at < FAIL_TTL_MS) return { ok: false, cached: false };
 
   try {
     const text = await fetchDocxAsText(driveId);
-    textCache.set(driveId, { text, at: Date.now() });
+    // Fold once per document — repeat searches then skip both the download
+    // and the (relatively expensive) accent-folding pass.
+    const folded = foldText(text);
+    textCache.set(driveId, { text, folded, at: Date.now() });
     failCache.delete(driveId);
     if (textCache.size > 60) { // bound memory in the isolate
       const oldest = textCache.keys().next().value;
       if (oldest !== undefined) textCache.delete(oldest);
     }
-    return { ok: true, text, cached: false };
+    return { ok: true, text, folded, cached: false };
   } catch {
     failCache.set(driveId, { at: Date.now() });
     return { ok: false, cached: false };
@@ -166,7 +170,7 @@ async function getManualText(driveId: string): Promise<TextOutcome> {
 async function searchManual(m: ManualMeta, query: string): Promise<{ ok: true; hit: SearchHit | null; cached: boolean } | { ok: false; cached: false }> {
   const got = await getManualText(m.driveId);
   if (!got.ok) return { ok: false, cached: false };
-  const { snippets, terms, count } = searchInText(got.text, query);
+  const { snippets, terms, count } = searchInText(got.text, got.folded, query);
   return {
     ok: true,
     cached: got.cached,
@@ -321,48 +325,37 @@ function queryVariants(raw: string): string[] {
   });
 }
 
-// ── Find snippets for a list of terms ────────────────────────────────────────
-function findSnippets(text: string, terms: string[], ctx = 200, max = 5): string[] {
-  const snips:   string[] = [];
-  const usedPos  = new Set<number>(); // avoid duplicate snippets
-  const lc      = text.toLowerCase();
-  const unique  = [...new Set(terms.map(t => t.toLowerCase()).filter(Boolean))];
+// ── Match a set of terms inside a folded document ─────────────────────────────
+// Accent-insensitive, whole-token preferred, snippets sliced from the original.
+function collectMatches(text: string, folded: FoldedText, terms: string[]): { matches: TextMatch[]; terms: string[] } {
+  const unique = [...new Set(terms.map(t => t.trim()).filter(Boolean))];
+  const matches: TextMatch[] = [];
 
   for (const term of unique) {
-    let pos = 0;
-    while (snips.length < max) {
-      const idx = lc.indexOf(term, pos);
-      if (idx === -1) break;
-
-      if (!usedPos.has(idx)) {
-        usedPos.add(idx);
-        const s = Math.max(0, idx - ctx);
-        const e = Math.min(text.length, idx + term.length + ctx);
-        snips.push((s > 0 ? "…" : "") + text.slice(s, e) + (e < text.length ? "…" : ""));
-      }
-
-      pos = idx + Math.max(1, term.length);
-    }
-
-    if (snips.length >= max) break;
+    const hits = findMatches(text, folded, term);
+    if (hits.length) matches.push(...hits);
   }
 
-  return snips;
-}
+  if (!matches.length) return { matches: [], terms: unique };
 
-// Occurrence count over the union of all term positions (used for ranking).
-function countOccurrences(textLower: string, terms: string[]): number {
-  const positions = new Set<number>();
-  for (const raw of [...new Set(terms.map(t => t.toLowerCase()).filter(Boolean))]) {
-    let pos = 0;
-    for (;;) {
-      const idx = textLower.indexOf(raw, pos);
-      if (idx === -1) break;
-      positions.add(idx);
-      pos = idx + Math.max(1, raw.length);
-    }
+  // Precision pass: if any variant hits a whole token, drop the ones that only
+  // occur inside longer tokens ("501" inside "15012"). Falls back to every hit
+  // when no clean token exists, so recall is never lost.
+  const preferred = preferBoundary(matches);
+
+  // Deduplicate positions, keep the longest surface at each start offset.
+  const byStart = new Map<number, TextMatch>();
+  for (const match of preferred) {
+    const existing = byStart.get(match.start);
+    if (!existing || match.surface.length > existing.surface.length) byStart.set(match.start, match);
   }
-  return positions.size;
+
+  const deduped = [...byStart.values()].sort((a, b) => a.start - b.start);
+  // Surface forms as written in the document (accents intact) — these give the
+  // UI exact strings to highlight even when the query was typed unaccented.
+  const surfaces = [...new Set(deduped.map(m => m.surface))];
+
+  return { matches: deduped, terms: [...new Set([...unique, ...surfaces])] };
 }
 
 // ── Full-text search: phrase first, then AND-of-words ─────────────────────────
@@ -370,36 +363,42 @@ function countOccurrences(textLower: string, terms: string[]): number {
 // 1. Phrase pass  — the whole query (plus tag variants like E-501/E501/E 501)
 //    must appear literally. This is what equipment-tag lookups rely on.
 // 2. AND pass     — for multi-word queries that are not a contiguous phrase:
-//    EVERY word (≥2 chars) must appear somewhere in the document; snippets are
+//    EVERY word (>=2 chars) must appear somewhere in the document; snippets are
 //    collected around the individual words. So "refrigeration propane" finds
 //    the manual even when the two words sit in different sentences.
 //
+// Matching is accent-insensitive in both passes ("mesure" finds "mesur\u00e9"),
+// and whole-token hits outrank hits buried inside longer tokens.
+//
 // Returns snippet contexts, the terms to highlight client-side, and an
 // occurrence count for cross-document ranking.
-function searchInText(text: string, query: string): { snippets: string[]; terms: string[]; count: number } {
+function searchInText(text: string, folded: FoldedText, query: string): { snippets: string[]; terms: string[]; count: number } {
   const variants = queryVariants(query);
 
-  const phraseSnips = findSnippets(text, variants, 200, 5);
-  if (phraseSnips.length) {
-    return { snippets: phraseSnips, terms: variants, count: countOccurrences(text.toLowerCase(), variants) };
+  const phrase = collectMatches(text, folded, variants);
+  if (phrase.matches.length) {
+    return {
+      snippets: buildSnippets(text, phrase.matches, 200, 5),
+      terms: phrase.terms,
+      count: phrase.matches.length,
+    };
   }
 
   const words = query.split(/\s+/).filter(w => w.length >= 2);
   if (words.length >= 2) {
     const wordTerms: string[] = [];
-    const everyWordPresent = words.every(word => {
-      const wordVariants = queryVariants(word);
-      wordTerms.push(...wordVariants);
-      const lc = text.toLowerCase();
-      return wordVariants.some(v => lc.includes(v.toLowerCase()));
-    });
+    for (const word of words) wordTerms.push(...queryVariants(word));
 
-    if (everyWordPresent) {
-      const terms = [...new Set([...wordTerms, ...variants])];
+    const perWord = words.map(word => collectMatches(text, folded, queryVariants(word)));
+    if (perWord.every(result => result.matches.length)) {
+      const matches = perWord
+        .flatMap(result => result.matches)
+        .sort((a, b) => a.start - b.start);
+      const terms = [...new Set([...wordTerms, ...variants, ...perWord.flatMap(r => r.terms)])];
       return {
-        snippets: findSnippets(text, terms, 200, 5),
+        snippets: buildSnippets(text, matches, 200, 5),
         terms,
-        count: countOccurrences(text.toLowerCase(), wordTerms),
+        count: matches.length,
       };
     }
   }
