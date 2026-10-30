@@ -5,6 +5,7 @@ import path from "path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { onRequestOptions, onRequestPost } from "./functions/api/ai-agent";
 import { onRequestOptions as searchManualOptions, onRequestPost as searchManualPost } from "./functions/api/search-manual";
+import { onRequestOptions as newsOptions, onRequestGet as newsGet } from "./functions/api/news";
 
 const isElectron = process.env.BUILD_TARGET === "electron";
 
@@ -16,13 +17,17 @@ function assistantApiPlugin(): Plugin {
     if (!requestUrl) return next();
     const isAssistant = requestUrl.startsWith("/api/ai-agent");
     const isManualSearch = requestUrl.startsWith("/api/search-manual");
-    if (!isAssistant && !isManualSearch) return next();
-    if (req.method !== "POST" && req.method !== "OPTIONS") {
+    const isNews = requestUrl.startsWith("/api/news");
+    if (!isAssistant && !isManualSearch && !isNews) return next();
+    const allowed = isNews ? ["GET", "OPTIONS"] : ["POST", "OPTIONS"];
+    if (!allowed.includes(req.method ?? "")) {
       res.statusCode = 405;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ error: "Method not allowed" }));
       return;
     }
+    const isRead = req.method === "GET" || req.method === "HEAD";
+
     try {
       const forwardedHost = req.headers["x-forwarded-host"];
       const host = (Array.isArray(forwardedHost) ? forwardedHost[0] : forwardedHost)?.split(",")[0]?.trim() || req.headers.host || "localhost:8081";
@@ -40,11 +45,13 @@ function assistantApiPlugin(): Plugin {
       const request = new Request(url, {
         method: req.method,
         headers,
-        body: req.method === "POST" ? Buffer.concat(chunks) : undefined,
+        body: isRead ? undefined : Buffer.concat(chunks),
       });
-      const response = isManualSearch
-        ? (req.method === "OPTIONS" ? await searchManualOptions({ request }) : await searchManualPost({ request, env: process.env }))
-        : (req.method === "OPTIONS" ? await onRequestOptions({ request }) : await onRequestPost({ request, env: process.env }));
+      const response = isNews
+        ? (req.method === "OPTIONS" ? await newsOptions({ request }) : await newsGet({ request, env: process.env }))
+        : isManualSearch
+          ? (req.method === "OPTIONS" ? await searchManualOptions({ request }) : await searchManualPost({ request, env: process.env }))
+          : (req.method === "OPTIONS" ? await onRequestOptions({ request }) : await onRequestPost({ request, env: process.env }));
       res.statusCode = response.status;
       response.headers.forEach((value, key) => res.setHeader(key, value));
       res.end(Buffer.from(await response.arrayBuffer()));

@@ -1,10 +1,10 @@
 // src/pages/News.tsx
-import { useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import {
   Newspaper, TrendingUp, Globe,
   ArrowUpRight, ExternalLink, Zap, Activity,
   LucideIcon, Filter, Flame, Factory, MapPin,
-  Search, X, ArrowDownUp,
+  Search, X, ArrowDownUp, RefreshCw, RadioTower, AlertTriangle, Rss,
 } from "lucide-react";
 import { useI18n } from "@/contexts/I18nContext";
 import { GNL1Z_ASSETS } from "@/utils/assets";
@@ -20,7 +20,8 @@ const newsSlides = [
 type Category = "All" | "Operations" | "Market" | "Algeria" | "Global";
 
 interface Article {
-  id: number;
+  /** Curated dispatches use numeric ids; live headlines use their URL. */
+  id: number | string;
   category: Exclude<Category, "All">;
   title: string;
   title_fr: string;
@@ -32,6 +33,18 @@ interface Article {
   /** External reference URL, or "#" for internal dispatches with no public link. */
   link: string;
   featured?: boolean;
+  /** Present on items fetched live from /api/news. */
+  live?: boolean;
+}
+
+/** Shape returned by the Cloudflare Pages Function (functions/api/news.ts). */
+interface LiveFeed {
+  items: Array<{ id: string; title: string; summary: string; source: string; link: string; dateISO: string; category: Exclude<Category, "All">; live: true }>;
+  generatedAt: string;
+  degraded: boolean;
+  reason?: string;
+  sources: Array<{ name: string; ok: boolean; items: number }>;
+  cached: boolean;
 }
 
 const NEWS: Article[] = [
@@ -268,6 +281,18 @@ function fmtDate(dateISO: string, lang: "en" | "fr"): string {
 }
 
 const L = (lang: "en" | "fr", en: string, fr: string) => (lang === "fr" ? fr : en);
+
+/** "3 min ago" / "il y a 3 min" — coarse on purpose, no library needed. */
+function timeAgo(timestamp: number, lang: "en" | "fr"): string {
+  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  if (seconds < 60) return lang === "fr" ? "à l'instant" : "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return lang === "fr" ? `il y a ${minutes} min` : `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return lang === "fr" ? `il y a ${hours} h` : `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return lang === "fr" ? `il y a ${days} j` : `${days}d ago`;
+}
 const hasPublicLink = (article: Article) => article.link !== "#" && article.link.trim() !== "";
 
 /* ─── COMPONENT ───────────────────────────────────────────────────────────── */
@@ -279,6 +304,66 @@ export default function News() {
   const [searchQ, setSearchQ] = useState("");
   const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
 
+  // ── Live headlines (server-side aggregation; see functions/api/news.ts) ──
+  const [live, setLive] = useState<LiveFeed | null>(null);
+  const [liveLoading, setLiveLoading] = useState(false);
+  const [liveFailed, setLiveFailed] = useState(false);
+  const [refreshedAt, setRefreshedAt] = useState<number | null>(null);
+  const [, setClockTick] = useState(0);
+  const liveAbort = useRef<AbortController | null>(null);
+
+  // Keeps "updated 4 min ago" honest without a per-second re-render.
+  useEffect(() => {
+    const id = setInterval(() => setClockTick(t => t + 1), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const loadLive = useCallback(async () => {
+    liveAbort.current?.abort();
+    const controller = new AbortController();
+    liveAbort.current = controller;
+    setLiveLoading(true);
+    setLiveFailed(false);
+    try {
+      const res = await fetch("/api/news", { signal: controller.signal, headers: { Accept: "application/json" } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json() as LiveFeed;
+      setLive(data);
+      setRefreshedAt(Date.now());
+    } catch (error) {
+      if ((error as Error)?.name === "AbortError") return;
+      // A dead feed must never break the page: the curated dispatches stand in.
+      setLiveFailed(true);
+    } finally {
+      if (!controller.signal.aborted) setLiveLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadLive();
+    return () => liveAbort.current?.abort();
+  }, [loadLive]);
+
+  /** Live headlines + curated dispatches, de-duplicated by headline. */
+  const all = useMemo<Article[]>(() => {
+    const liveItems: Article[] = (live?.items ?? []).map(item => ({
+      id: item.id,
+      category: item.category,
+      // Headlines are real quotes — they are never machine-translated.
+      title: item.title,
+      title_fr: item.title,
+      summary: item.summary,
+      summary_fr: item.summary,
+      dateISO: item.dateISO,
+      source: item.source,
+      link: item.link,
+      live: true,
+    }));
+
+    const seen = new Set(liveItems.map(a => a.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()));
+    return [...liveItems, ...NEWS.filter(a => !seen.has(a.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()))];
+  }, [live]);
+
   useEffect(() => {
     if (heroPaused) return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -288,21 +373,29 @@ export default function News() {
 
   const filtered = useMemo(() => {
     const q = searchQ.trim().toLowerCase();
-    const list = NEWS.filter(a => {
+    const list = all.filter(a => {
       if (activeCategory !== "All" && a.category !== activeCategory) return false;
       if (!q) return true;
       return a.title.toLowerCase().includes(q) || a.title_fr.toLowerCase().includes(q)
         || a.summary.toLowerCase().includes(q) || a.summary_fr.toLowerCase().includes(q)
         || a.source.toLowerCase().includes(q);
     });
-    const byNewest = (a: Article, b: Article) => b.dateISO.localeCompare(a.dateISO) || b.id - a.id;
+    // Curated dispatches keep their numeric id order; live headlines (id = URL)
+    // sort after them and among themselves by URL, so ties stay deterministic.
+    const idRank = (a: Article) => (typeof a.id === "number" ? a.id : Number.MAX_SAFE_INTEGER);
+    const byNewest = (a: Article, b: Article) =>
+      b.dateISO.localeCompare(a.dateISO) || idRank(b) - idRank(a) || String(a.id).localeCompare(String(b.id));
     return [...list].sort(sortOrder === "newest" ? byNewest : (a, b) => byNewest(b, a));
-  }, [activeCategory, searchQ, sortOrder]);
+  }, [activeCategory, searchQ, sortOrder, all]);
 
-  const featured = filtered.find(a => a.featured);
+  // Lead with the freshest live headline when there is one; otherwise the
+  // curated featured dispatch keeps its place.
+  const featured = filtered.find(a => a.live) ?? filtered.find(a => a.featured);
   const grid = featured ? filtered.filter(a => a.id !== featured.id) : filtered;
 
   const curatedDate = NEWS.reduce((max, a) => (a.dateISO > max ? a.dateISO : max), NEWS[0].dateISO);
+  const latestDate = all.reduce((max, a) => (a.dateISO > max ? a.dateISO : max), all[0]?.dateISO ?? curatedDate);
+  const liveCount = live?.items.length ?? 0;
   const clearFilters = () => { setActiveCategory("All"); setSearchQ(""); };
 
   return (
@@ -334,8 +427,8 @@ export default function News() {
             </h1>
             <p className="text-sm md:text-base text-zinc-300 max-w-xl leading-relaxed drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]">
               {lang === "en"
-                ? `${NEWS.length} industry dispatches · reference market snapshots · Sonatrach & global LNG · curated ${fmtDate(curatedDate, lang)}`
-                : `${NEWS.length} dépêches · indices de marché de référence · Sonatrach & GNL mondial · compilé le ${fmtDate(curatedDate, lang)}`}
+                ? `${NEWS.length} industry dispatches${liveCount ? ` · ${liveCount} live headline${liveCount === 1 ? "" : "s"}` : ""} · reference market snapshots · Sonatrach & global LNG · latest ${fmtDate(latestDate, lang)}`
+                : `${NEWS.length} dépêches${liveCount ? ` · ${liveCount} titre${liveCount === 1 ? "" : "s"} en direct` : ""} · indices de marché de référence · Sonatrach & GNL mondial · compilé le ${fmtDate(latestDate, lang)}`}
             </p>
             <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-3 max-w-3xl">
               <MarketStat icon={TrendingUp} label="TTF (EU)"   value="€31.44" trend="+2.4%" />
@@ -361,6 +454,82 @@ export default function News() {
               ))}
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* ── LIVE FEED STATUS ───────────────────────────────────────────────── */}
+      <section className="px-4 md:px-10 max-w-7xl mx-auto" aria-live="polite">
+        <div
+          data-testid="live-status"
+          className={[
+          "flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border px-4 py-3 text-xs font-mono",
+          liveFailed || live?.degraded
+            ? "border-amber-500/40 bg-amber-500/5 text-amber-600 dark:text-amber-400"
+            : "border-border bg-muted/30 text-muted-foreground",
+        ].join(" ")}>
+          {liveLoading ? (
+            <>
+              <RefreshCw className="h-3.5 w-3.5 animate-spin text-orange-500" />
+              <span>{L(lang, "Fetching live headlines…", "Chargement des titres en direct…")}</span>
+            </>
+          ) : live && live.items.length > 0 ? (
+            <>
+              <RadioTower className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span className="font-bold text-foreground">
+                {L(
+                  lang,
+                  `${live.items.length} live headline${live.items.length === 1 ? "" : "s"}`,
+                  `${live.items.length} titre${live.items.length === 1 ? "" : "s"} en direct`,
+                )}
+              </span>
+              <span aria-hidden="true">·</span>
+              <span>
+                {L(lang, "updated", "mis à jour")} {refreshedAt ? timeAgo(refreshedAt, lang) : L(lang, "just now", "à l'instant")}
+              </span>
+              <span aria-hidden="true">·</span>
+              <span>{L(lang, "latest", "dernier")} {fmtDate(live.items[0].dateISO, lang)}</span>
+              {live.degraded && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    {L(lang, "some sources unreachable", "certaines sources injoignables")}
+                  </span>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+              <span>
+                {L(
+                  lang,
+                  "Live feed unavailable — showing curated dispatches only.",
+                  "Flux en direct indisponible — affichage des dépêches compilées uniquement.",
+                )}
+              </span>
+            </>
+          )}
+
+          <button
+            type="button"
+            onClick={() => void loadLive()}
+            disabled={liveLoading}
+            aria-label={L(lang, "Refresh live headlines", "Actualiser les titres en direct")}
+            className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-[11px] uppercase tracking-widest text-muted-foreground hover:text-orange-500 hover:border-orange-500/40 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3 w-3 ${liveLoading ? "animate-spin" : ""}`} />
+            {L(lang, "Refresh", "Actualiser")}
+          </button>
+          <a
+            href="/api/news"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={L(lang, "Open the raw news feed (JSON)", "Ouvrir le flux brut (JSON)")}
+            className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-muted-foreground hover:text-orange-500 transition-colors"
+          >
+            <Rss className="h-3 w-3" />JSON
+          </a>
         </div>
       </section>
 
@@ -471,6 +640,16 @@ function CategoryBadge({ category, lang }: { category: Exclude<Category, "All">;
   );
 }
 
+/** Marks a headline that came from the live feed rather than the curated set. */
+function LiveBadge({ lang }: { lang: "en" | "fr" }) {
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[10px] font-mono font-bold uppercase tracking-widest">
+      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />
+      {L(lang, "Live", "Direct")}
+    </span>
+  );
+}
+
 function FeaturedCard({ article, lang }: { article: Article; lang: "en" | "fr" }) {
   const title = lang === "fr" ? article.title_fr : article.title;
   const summary = lang === "fr" ? article.summary_fr : article.summary;
@@ -485,6 +664,7 @@ function FeaturedCard({ article, lang }: { article: Article; lang: "en" | "fr" }
               <Flame className="h-3 w-3" /> {L(lang, "Featured", "À la une")}
             </span>
             <CategoryBadge category={article.category} lang={lang} />
+            {article.live && <LiveBadge lang={lang} />}
           </div>
           <h3 className="text-2xl md:text-3xl font-display font-extrabold leading-tight group-hover:text-orange-400 transition-colors">
             {title}
@@ -529,7 +709,10 @@ function ArticleCard({ article, lang }: { article: Article; lang: "en" | "fr" })
     <>
       <div className="space-y-3">
         <div className="flex items-start justify-between gap-2">
-          <CategoryBadge category={article.category} lang={lang} />
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <CategoryBadge category={article.category} lang={lang} />
+            {article.live && <LiveBadge lang={lang} />}
+          </div>
           {external && <ExternalLink className="h-3.5 w-3.5 text-muted-foreground group-hover:text-orange-500 transition-colors shrink-0 mt-0.5" />}
         </div>
         <h3 className="font-display font-bold leading-snug text-base group-hover:text-orange-400 transition-colors">
