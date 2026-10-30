@@ -80,25 +80,14 @@ function InstrumentCard({
         </div>
       </div>
 
-      {/* Where it is */}
-      <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono text-muted-foreground">
-        {unit && (
-          <span className="inline-flex items-center gap-1 border border-border rounded-md px-2 py-1">
-            <Layers className="h-3 w-3" />
-            {unit.code} · {L(lang, unit.en, unit.fr)}
-          </span>
-        )}
-        {parsed.train && (
-          <span className="inline-flex items-center gap-1 border border-border rounded-md px-2 py-1">
-            <CircleDot className="h-3 w-3" />
-            {L(lang, "Train", "Train")} {parsed.train}
-          </span>
-        )}
-        {parsed.loop && (
-          <span className="inline-flex items-center gap-1 border border-border rounded-md px-2 py-1">
-            {L(lang, "Loop", "Boucle")} {parsed.loop}
-          </span>
-        )}
+      {/* Where it is — one line, not three badges. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] font-mono text-muted-foreground">
+        <span className="inline-flex items-center gap-1.5">
+          <Layers className="h-3 w-3" />
+          {unit ? `${unit.code} · ${L(lang, unit.en, unit.fr)}` : L(lang, "Unit not read", "Unité non lue")}
+          {parsed.train ? ` · ${L(lang, "train", "train")} ${parsed.train}` : ""}
+          {parsed.loop ? ` · ${L(lang, "loop", "boucle")} ${parsed.loop}` : ""}
+        </span>
         <button
           type="button"
           onClick={() => onLocate(entry)}
@@ -117,7 +106,7 @@ function InstrumentCard({
             <FileText className="h-3 w-3" />
             {L(lang, "On the drawings", "Sur les plans")}
             <span className="text-amber-500/80 normal-case tracking-normal">
-              · {L(lang, "unit-level, not verified", "niveau unité, non vérifié")}
+              · {L(lang, "unit-level", "niveau unité")}
             </span>
           </div>
           <div className="flex flex-wrap gap-1.5">

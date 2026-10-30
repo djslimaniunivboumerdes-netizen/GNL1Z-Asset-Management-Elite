@@ -11,6 +11,7 @@ Expert AI GNL1 is the floating assistant in the GNL1Z asset-management workspace
 - Return source cards that link to equipment, P&ID PDFs, DCS panels, the manual directory, the derived register CSV, or a supplied line list.
 - Continue a short conversation (up to six prior messages are sent to the provider).
 - Keep the current chat in `sessionStorage` for the browser tab, with an eight-hour expiry and a confirmed clear action.
+- Answer **instrument questions** (`where is LIC101204?`): identity, unit and train, the drawings that cover the unit as a lead, the equipment and piping around them labelled by source, the specifications with their provenance, the gaps, and links to the Instrument Finder and the P&ID viewer.
 - Work in English and French. The UI language follows the app language toggle.
 - Stop an in-flight request, retry a failed or cancelled request, copy an answer, and jump to the latest message.
 
@@ -48,6 +49,9 @@ Smart Flow declares `E0520` / `106-E05.20` with database tag `X06-E-05.30`, whil
 - Provide a hydrotest setpoint, lift plan, sling/shackle selection, torque value, insulation thickness, bypass, or operating instruction unless that information is explicitly present in approved supplied context.
 - Treat simulated alarms as real events.
 - Replace approved procedures, engineering judgment, or operating authorization.
+- Say that an instrument appears on a specific drawing. The drawings are a **unit-level lead**: no drawing in this system has been shown to carry an instrument tag as text.
+- Infer a process connection, a tapped line, a range, a span, a datasheet value, or an equipment relationship from the unit, the loop number, or proximity.
+- Present an instrument answer as an approved engineering instruction.
 
 When a value is missing, the assistant says it is not recorded. When no matching reference is found, it says so instead of guessing.
 
@@ -55,11 +59,29 @@ When a value is missing, the assistant says it is not recorded. When no matching
 
 | Mode | Meaning |
 | --- | --- |
-| `reference` | Deterministic answer built only from checked sources. Used when no provider key is configured, for piping count/size questions, and for unknown/ambiguous tags. |
+| `reference` | Deterministic answer built only from checked sources. Used when no provider key is configured, for piping count/size questions, for instrument questions, and for unknown/ambiguous tags. |
 | `ai` | A configured Gemini provider narrates the deterministic, source-backed answer. It is instructed not to add unsupported facts. |
 | `cache` | The same prompt, language, history, and scoped context were answered recently. The cached answer is returned without another provider call. |
 
 The UI labels these honestly as **Static reference**, **AI-assisted**, or **Cached answer**. It does not display fake cache-hit or zero-latency badges.
+
+## Instrument answers
+
+An instrument question is answered from `instrumentContext()` — the same object
+the Instrument Finder page renders — so the assistant cannot say more than the
+UI does. The intent is `instrument`, which is always served in `reference`
+mode: the provider is never called for it, so the mandatory rules above do not
+depend on a model behaving itself.
+
+Every value is labelled with its source: **ISA tag decode**, **DCS scan**
+(image not re-verified), **Equipment register** (verified), or **Drawing index
+(OCR)** (not verified). The answer ends with what is unavailable — the exact
+position on the drawing, the tapped line, and the range/span/datasheet —
+rather than leaving them out, and with a boundary note saying it is advisory.
+
+Links point at `/instruments?q=…` and `/pids?file=…`. The assistant never
+returns a signed URL, a storage path, a Drive ID or a credential, so the
+existing document permissions and RLS still decide who can open what.
 
 ## Data boundaries
 

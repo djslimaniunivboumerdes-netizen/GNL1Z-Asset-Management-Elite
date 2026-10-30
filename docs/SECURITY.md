@@ -296,6 +296,37 @@ review and is treatable as exposed to anyone with an API token. Rotating it in
 Google Cloud Console (and pasting the new value into Authentication →
 Providers → Google) is recommended and needs your go-ahead.
 
+**Updated 2026-10-30.** The exposure was re-confirmed by calling
+`GET /v1/projects/{ref}/config/auth` on the production project during the
+instrument-traceability review: the field `external_google_secret` is returned
+in cleartext, not redacted. The management token itself was never exposed —
+the connector holds it server-side — but the response was, so the audience for
+that secret widened from "management API token holders" to "readers of the
+session in which it was retrieved". Remediation, still pending your go-ahead:
+
+1. Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 client
+   `546813307422-….apps.googleusercontent.com` → rotate the secret, then paste
+   the new value into Supabase → Authentication → Providers → Google on
+   `gdkqetzkhgllwbpmqmux`.
+2. Compare the returned value with the console: if it matches, treat it as
+   compromised and rotate now; if it does not, it is a digest and the urgency
+   is lower — rotation is still recommended.
+3. Treat management-API responses as secret artefacts: do not paste them into
+   chat, tickets, logs or screenshots.
+
+### Staging probe accounts — cleaned up
+
+The four accounts created on staging for the two-tier verification
+(`admin/technician/operator/auditor.staging@gnl1z.test`) were removed on
+2026-10-30, with the two `maintenance_logs` and two `engineering_documents`
+fixtures they had created. Staging now holds **0 users, 0 profiles,
+0 maintenance logs, 0 document registry rows**. The `audit_log` was
+deliberately kept (7 rows): the probe entries plus the two DELETE entries the
+cleanup itself generated. Recreating the accounts is documented in
+`docs/TESTING.md` (staging accounts section). Production has no `profiles`,
+`audit_log` or `engineering_documents` table at all — nothing was applied
+there.
+
 ## Document migration plan (R-01)
 
 Executed only with the document owner's authorisation:

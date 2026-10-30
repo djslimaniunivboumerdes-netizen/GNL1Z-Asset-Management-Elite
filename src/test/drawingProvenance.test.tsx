@@ -75,6 +75,12 @@ describe("provenance follows the instrument", () => {
     }
     // At least one carries a citable drawing number.
     expect(provenance.some((row) => /85-X01/.test(row.textContent ?? ""))).toBe(true);
+
+    // "What is verified? What is missing?" is answered before the detail.
+    const trust = within(dialog).getByTestId("locator-trust");
+    expect(trust).toHaveTextContent(/\d+ verified/);
+    expect(trust).toHaveTextContent(/\d+ indicative/);
+    expect(trust).toHaveTextContent(/\d+ not available/);
   });
 
   it("explains a drawing numbered for another unit", async () => {

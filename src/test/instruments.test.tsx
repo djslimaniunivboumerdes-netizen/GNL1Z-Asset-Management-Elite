@@ -212,7 +212,7 @@ describe("Instrument Finder on the drawings", () => {
     const link = within(drawings).getAllByRole("link")[0];
     expect(link).toHaveAttribute("href", expect.stringContaining("/pids?file="));
     // And it says plainly that this is unit-level, not a located bubble.
-    expect(drawings).toHaveTextContent(/unit-level, not verified/);
+    expect(drawings).toHaveTextContent(/unit-level/);
   });
 
   it("says so when no drawing can be tied to a tag", () => {

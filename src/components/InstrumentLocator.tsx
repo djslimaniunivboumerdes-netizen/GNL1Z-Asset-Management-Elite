@@ -48,6 +48,8 @@ interface Props {
 export default function InstrumentLocator({ entry, open, onOpenChange }: Props) {
   const { lang } = useI18n();
   const context = entry ? instrumentContext(entry, lang) : null;
+  const verifiedCount = context ? context.specs.filter((spec) => spec.verified).length : 0;
+  const indicativeCount = context ? context.specs.filter((spec) => !spec.verified).length : 0;
   // Three drawing numbers are carried by more than one file; those rows name the
   // file, otherwise the two look identical and one never gets opened.
   const sharedLabels = new Set(
@@ -75,6 +77,20 @@ export default function InstrumentLocator({ entry, open, onOpenChange }: Props) 
               <p className="text-xs text-muted-foreground pt-2 leading-relaxed" data-testid="locator-summary">
                 {lang === "fr" ? context.summaryFr : context.summaryEn}
               </p>
+              {/* "What is verified? What is missing?" — answered before the detail. */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-2" data-testid="locator-trust">
+                <span className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-mono text-emerald-400">
+                  <BadgeCheck className="h-3 w-3" />
+                  {verifiedCount} {L(lang, "verified", "vérifié(s)")}
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-mono text-amber-400">
+                  {indicativeCount} {L(lang, "indicative", "indicatif(s)")}
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[10px] font-mono text-muted-foreground">
+                  <AlertTriangle className="h-3 w-3" />
+                  {context.missing.length} {L(lang, "not available", "non disponible(s)")}
+                </span>
+              </div>
             </DialogHeader>
 
             {/* ── Where it is ─────────────────────────────────────────────── */}

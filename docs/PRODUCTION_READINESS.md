@@ -45,10 +45,21 @@ Detail, evidence and accepted risks: `docs/SECURITY.md`. Probe results:
 | P&IDs/PFDs served as static public assets | vulnerability | **Prepared, not executed** | Tooling and runbook ready; upload needs a networked machine |
 | `unsafe-eval` in CSP, dead `api.anthropic.com` origin | config | **Accepted risk R-03** | Needs a staged regression run |
 | `password_min_length: 6`, HIBP off | config | **Unchanged** | Not exposed by the management tooling; dashboard action |
-| Google OAuth client secret returned by the management API | config | **OPEN** | Treat as exposed to token holders; rotate in Google Cloud Console |
+| Google OAuth client secret returned by the management API | config | **OPEN** | Re-confirmed 2026-10-30: `external_google_secret` comes back in cleartext. Rotate in Google Cloud Console — see `docs/SECURITY.md` |
+| `line_list` classified INTERNAL by the migration script, RESTRICTED by the app | config | **OPEN — owner decision** | Affects one file, `public/data/gnl1z_equipment_register.csv`. Both tiers need the same session today; it is the one file the migration would leave public. Pinned by `src/test/documentClassParity.test.ts` |
+| Production has no `profiles`, `audit_log` or `engineering_documents` table | config | **Known** | The two-tier model and the document register are applied to staging only; production has received no migration |
 
 **Applied to a database?** Only to **staging** (`nwcpfsqsdjezkwkhxrqx`, restored
-from a dormant project for this purpose). Production has received nothing.
+from a dormant project for this purpose). Production has received nothing —
+verified again on 2026-10-30: production has 5 buckets, all public, 163 objects,
+and no `profiles`, `audit_log` or `engineering_documents` table.
+
+**Document counts, cross-checked 2026-10-30.** On disk: 46 RESTRICTED
+(44 P&ID + 2 PFD, 17.5 MiB), 34 INTERNAL, 9 unclassified (icons, screenshots,
+logo). In production: 0 registry rows, 0 objects in a private bucket, no
+`restricted-documents` bucket. In staging: the private bucket exists and is
+private, with 0 objects; the registry is empty. Nothing was uploaded, moved,
+archived or deleted.
 
 ## P0 — still required before operational production
 
