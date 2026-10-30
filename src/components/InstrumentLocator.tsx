@@ -18,7 +18,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { useI18n } from "@/contexts/I18nContext";
 import { describeInstrument } from "@/lib/instrumentTags";
-import { instrumentContext } from "@/lib/instrumentLocation";
+import {
+  instrumentContext, placementGroups, provenanceGaps, shortChecksum, type DrawingProvenance,
+} from "@/lib/instrumentLocation";
 import type { InstrumentEntry } from "@/lib/instrumentIndex";
 
 const L = (lang: "en" | "fr", en: string, fr: string) => (lang === "fr" ? fr : en);
@@ -46,6 +48,13 @@ interface Props {
 export default function InstrumentLocator({ entry, open, onOpenChange }: Props) {
   const { lang } = useI18n();
   const context = entry ? instrumentContext(entry, lang) : null;
+  // Three drawing numbers are carried by more than one file; those rows name the
+  // file, otherwise the two look identical and one never gets opened.
+  const sharedLabels = new Set(
+    (context ? placementGroups(context.placements) : [])
+      .filter((group) => group.placements.length > 1)
+      .map((group) => group.label),
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -103,7 +112,7 @@ export default function InstrumentLocator({ entry, open, onOpenChange }: Props) 
                           </div>
                           <div className="text-[11px] font-mono text-muted-foreground mt-1 flex items-center gap-1.5">
                             <CircleDot className="h-3 w-3" />
-                            {L(lang, "Unit", "Unité")} {placement.unit ?? context.unitCode ?? "—"}
+                            {L(lang, "Unit", "Unité")} {placement.unit ?? "—"}
                             {placement.equipmentOnSheet.length > 0 && (
                               <span>
                                 {" · "}
@@ -112,6 +121,27 @@ export default function InstrumentLocator({ entry, open, onOpenChange }: Props) 
                               </span>
                             )}
                           </div>
+                          {/* Why this drawing is here, when it is not obvious. */}
+                          {!placement.matchedByUnitDrawing && placement.matchedEquipment.length > 0 && (
+                            <div className="text-[11px] text-cyan-400/90 mt-0.5">
+                              {placement.unit
+                                ? L(
+                                    lang,
+                                    `Numbered for unit ${placement.unit} — listed because it shows ${placement.matchedEquipment.slice(0, 3).join(", ")} of this instrument's unit.`,
+                                    `Numéroté pour l'unité ${placement.unit} — listé car il montre ${placement.matchedEquipment.slice(0, 3).join(", ")} de l'unité de cet instrument.`,
+                                  )
+                                : L(
+                                    lang,
+                                    `No drawing number on the title block — listed because it shows ${placement.matchedEquipment.slice(0, 3).join(", ")}.`,
+                                    `Pas de numéro sur le cartouche — listé car il montre ${placement.matchedEquipment.slice(0, 3).join(", ")}.`,
+                                  )}
+                            </div>
+                          )}
+                          <ProvenanceLine
+                            provenance={placement.provenance}
+                            lang={lang}
+                            showFile={sharedLabels.has(placement.drawing ?? placement.title)}
+                          />
                         </div>
                         <Link
                           to={placement.url}
@@ -243,6 +273,49 @@ export default function InstrumentLocator({ entry, open, onOpenChange }: Props) 
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Source, checksum, extraction and verification — in one checkable line. */
+function ProvenanceLine({
+  provenance, lang, showFile = false,
+}: {
+  provenance: DrawingProvenance;
+  lang: "en" | "fr";
+  showFile?: boolean;
+}) {
+  const checksum = shortChecksum(provenance.sha256);
+  const readOn = provenance.extractedAt ? new Date(provenance.extractedAt).toISOString().slice(0, 10) : null;
+  const parts = [
+    showFile ? provenance.file.replace(/^\/pids\//, "").replace(/\.pdf$/i, "") : null,
+    provenance.drawing ? `${L(lang, "Drawing", "Plan")} ${provenance.drawing}` : null,
+    provenance.revision
+      ? `${L(lang, "Rev.", "Rév.")} ${provenance.revision}`
+      : L(lang, "Revision not recorded", "Révision non enregistrée"),
+    checksum ? `${L(lang, "checksum", "empreinte")} ${checksum}` : null,
+    provenance.extractionMethod ? provenance.extractionMethod : null,
+    readOn ? `${L(lang, "read", "lu")} ${readOn}` : null,
+  ].filter(Boolean) as string[];
+
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] font-mono text-muted-foreground" data-testid="drawing-provenance">
+      {parts.map((part) => (
+        <span key={part}>{part}</span>
+      ))}
+      {provenance.verified ? (
+        <span className="text-emerald-500">
+          <BadgeCheck className="inline h-3 w-3 mr-0.5" />
+          {L(lang, "verified", "vérifié")}
+        </span>
+      ) : (
+        <span className="text-amber-500/90">{L(lang, "not verified", "non vérifié")}</span>
+      )}
+      {provenanceGaps(provenance, lang).length > 0 && (
+        <span className="text-muted-foreground/70" title={provenanceGaps(provenance, lang).join(" · ")}>
+          · {provenanceGaps(provenance, lang).length} {L(lang, "gaps", "lacunes")}
+        </span>
+      )}
+    </div>
   );
 }
 

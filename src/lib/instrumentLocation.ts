@@ -46,14 +46,100 @@ export interface InstrumentLine {
   file: string;
 }
 
+/**
+ * Where a drawing came from and how it was read.
+ *
+ * Revision is not in the source data for any of the 44 sheets, so it stays null
+ * and the UI says "Revision not recorded" — the index never invents one. Same
+ * for the train: a drawing number (85-X06-10.1) carries the unit, not the train.
+ */
+export interface DrawingProvenance {
+  drawing: string | null;
+  titleEn: string | null;
+  titleFr: string | null;
+  /** Unit read from the drawing number; null when the title block was unreadable. */
+  unit: string | null;
+  /** Always null today: no drawing in the corpus records a train. */
+  train: string | null;
+  /** Always null today: no revision is recorded for any sheet. */
+  revision: string | null;
+  revisionDate: string | null;
+  file: string;
+  sha256: string | null;
+  bytes: number | null;
+  pages: number | null;
+  /** Extraction backend, e.g. "ocr-rapidocr". */
+  extractionMethod: string | null;
+  extractedAt: string | null;
+  verified: boolean;
+  verifiedBy: string | null;
+  verifiedAt: string | null;
+}
+
+/** Provenance of one drawing, straight from the extraction index. */
+export function drawingProvenance(sheet: PidSheetIndex): DrawingProvenance {
+  return {
+    drawing: sheet.drawing ?? null,
+    titleEn: sheet.titleEn ?? null,
+    titleFr: sheet.titleFr ?? null,
+    unit: (/X0?(\d{1,2})/i.exec(sheet.drawing ?? "")?.[1] ?? null)?.padStart(2, "0") ?? null,
+    // Not recorded on any drawing in this corpus — never guessed from the tag.
+    train: null,
+    revision: null,
+    revisionDate: null,
+    file: sheet.file,
+    sha256: sheet.sha256 ?? null,
+    bytes: sheet.bytes ?? null,
+    pages: sheet.pages ?? null,
+    extractionMethod: sheet.backend ?? null,
+    extractedAt: sheet.extractedAt ?? null,
+    verified: Boolean(sheet.verified),
+    verifiedBy: null,
+    verifiedAt: null,
+  };
+}
+
+/** Provenance by file, for the P&ID viewer. */
+export function sheetProvenance(file: string | null | undefined): DrawingProvenance | null {
+  if (!file) return null;
+  const sheet = PID_INDEX.sheets.find((candidate) => candidate.file === file);
+  return sheet ? drawingProvenance(sheet) : null;
+}
+
+/** Short, checkable fingerprint — the full value stays on the object. */
+export function shortChecksum(sha256: string | null): string | null {
+  if (!sha256) return null;
+  return sha256.length > 16 ? `${sha256.slice(0, 12)}…` : sha256;
+}
+
+/** The provenance fields the source data simply does not carry. */
+export function provenanceGaps(provenance: DrawingProvenance, lang: "en" | "fr"): string[] {
+  const gaps: string[] = [];
+  const en = lang === "en";
+  if (!provenance.revision) gaps.push(en ? "Revision not recorded" : "Révision non enregistrée");
+  if (!provenance.train) gaps.push(en ? "Train not recorded on the drawing" : "Train non indiqué sur le plan");
+  if (!provenance.verified) {
+    gaps.push(en ? "No human verification recorded" : "Aucune vérification humaine enregistrée");
+  }
+  return gaps;
+}
+
 export interface InstrumentPlacement {
   file: string;
   drawing: string | null;
   title: string;
   titleEn: string | null;
   titleFr: string | null;
-  /** Plant unit of the drawing, e.g. "06". */
+  /** Plant unit read from the drawing number, e.g. "06" — null when unreadable. */
   unit: string | null;
+  /** The instrument's unit that put this drawing in the list. */
+  matchedUnit: string | null;
+  /** True when the drawing number itself says the same unit. */
+  matchedByUnitDrawing: boolean;
+  /** Equipment of the instrument's unit shown on this drawing — the reason it is
+   *  listed when the drawing number says another unit, or carries none. */
+  matchedEquipment: string[];
+  provenance: DrawingProvenance;
   /** Deep link into the P&ID viewer. */
   url: string;
   /** Set when a vector PDF ships with the app (26 of the 44 sheets today). */
@@ -100,14 +186,22 @@ export interface InstrumentContext {
 /** Only 26 of the 44 sheets ship as vector PDFs; the rest open from Drive. */
 const LOCAL_PDFS = new Set(Object.values(localSheetFiles as Record<string, string>));
 
-function toPlacement(sheet: PidSheetIndex): InstrumentPlacement {
+function toPlacement(sheet: PidSheetIndex, unit: string | null): InstrumentPlacement {
+  const provenance = drawingProvenance(sheet);
+  const onSheet = (sheet.equipment ?? []).map((tag) => tag.trim()).filter(Boolean);
   return {
     file: sheet.file,
     drawing: sheet.drawing ?? null,
     title: sheet.titleEn ?? sheet.title ?? sheet.file.replace(/^\/pids\//, "").replace(/\.pdf$/i, ""),
     titleEn: sheet.titleEn ?? null,
     titleFr: sheet.titleFr ?? null,
-    unit: (/X0?(\d{1,2})/i.exec(sheet.drawing ?? "")?.[1] ?? null)?.padStart(2, "0") ?? null,
+    unit: provenance.unit,
+    matchedUnit: unit,
+    matchedByUnitDrawing: Boolean(unit) && provenance.unit === unit,
+    matchedEquipment: unit
+      ? onSheet.filter((tag) => new RegExp(`^X${unit}-`, "i").test(tag))
+      : [],
+    provenance,
     url: `/pids?file=${encodeURIComponent(sheet.file)}`,
     localPdf: LOCAL_PDFS.has(sheet.file) ? sheet.file : null,
     equipmentOnSheet: [...(sheet.equipment ?? [])],
@@ -169,7 +263,25 @@ export function instrumentPlacements(entry: InstrumentEntry): InstrumentPlacemen
       if (aHasDrawing !== Boolean(b.sheet.drawing)) return aHasDrawing ? -1 : 1;
       return (a.sheet.drawing ?? a.sheet.title).localeCompare(b.sheet.drawing ?? b.sheet.title, undefined, { numeric: true });
     })
-    .map(({ sheet }) => toPlacement(sheet));
+    .map(({ sheet }) => toPlacement(sheet, unit));
+}
+
+/**
+ * One row per drawing number — three numbers (85-X02-10.3, 85-X10-10.2,
+ * 85-X07-10) are carried by more than one file, and showing the same chip twice
+ * would look like a bug and hide one of the files.
+ */
+export function placementGroups(
+  placements: InstrumentPlacement[],
+): Array<{ label: string; placements: InstrumentPlacement[] }> {
+  const groups = new Map<string, InstrumentPlacement[]>();
+  for (const placement of placements) {
+    const label = placement.drawing ?? placement.title;
+    const list = groups.get(label) ?? [];
+    list.push(placement);
+    groups.set(label, list);
+  }
+  return [...groups.entries()].map(([label, list]) => ({ label, placements: list }));
 }
 
 const contextCache = new Map<string, InstrumentContext>();
