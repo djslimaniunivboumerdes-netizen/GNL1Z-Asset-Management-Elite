@@ -10,10 +10,10 @@
 //  · the process-flow tags   (which equipment lives in that unit)
 // and exposes one ranked, searchable index over all of it.
 
-import { DCS_DETECTED_TAGS } from "@/data/dcs_tags";
-import { DCS_PANELS } from "@/data/dcs_panels";
-import { TAGS } from "@/data/smartFlow";
-import { parseInstrumentTag, resolveUnit, type InstrumentTag, type UnitInfo } from "@/lib/instrumentTags";
+import { DCS_DETECTED_TAGS } from "../data/dcs_tags";
+import { DCS_PANELS } from "../data/dcs_panels";
+import { TAGS } from "../data/smartFlow";
+import { parseInstrumentTag, resolveUnit, type InstrumentTag, type UnitInfo } from "./instrumentTags";
 
 export interface InstrumentPanelRef {
   id: string;

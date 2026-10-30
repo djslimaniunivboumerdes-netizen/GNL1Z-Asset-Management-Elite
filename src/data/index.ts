@@ -1,4 +1,4 @@
-import gnl1zDb from "@/data/gnl1z_database.json";
+import gnl1zDb from "./gnl1z_database.json";
 
 export interface SparePart {
   code: string | number;

@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 // src/data/dcs_panels.ts
 
 export interface DCSPanel {

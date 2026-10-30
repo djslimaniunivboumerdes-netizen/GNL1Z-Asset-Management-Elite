@@ -2,6 +2,9 @@ import knowledgeJson from "../data/assistant_knowledge.json";
 import { buildAliasIndex, compactTag, resolveEquipmentTag, type AliasRecord, type AliasResolution } from "./equipmentAliases";
 import { queryLineList, type LineListDataset, type LineListRow } from "./lineListCsv";
 import { connectionsForTag, pidCoverage, pidSheetByFile } from "./pidIndex";
+import { buildInstrumentIndex, findInstrument, type InstrumentEntry } from "./instrumentIndex";
+import { instrumentContext } from "./instrumentLocation";
+import { describeInstrument } from "./instrumentTags";
 
 export interface KnowledgeEquipment extends AliasRecord {
   kind: "register";
@@ -43,9 +46,9 @@ export interface AssistantKnowledge {
 }
 
 export const KNOWLEDGE = knowledgeJson as unknown as AssistantKnowledge;
-export type AssistantSourceKind = "equipment" | "dcs" | "manual" | "simulation" | "pid" | "csv";
+export type AssistantSourceKind = "equipment" | "dcs" | "manual" | "simulation" | "pid" | "csv" | "instrument";
 export interface KnowledgeSource { kind: AssistantSourceKind; id: string; title: string; href?: string; detail?: string }
-export type QuestionIntent = "line_count" | "line_sizes" | "pid" | "dcs" | "manual" | "alarm" | "equipment";
+export type QuestionIntent = "line_count" | "line_sizes" | "pid" | "dcs" | "manual" | "alarm" | "equipment" | "instrument";
 export interface ManualEvidence { id: string; title: string; snippets: string[] }
 export interface LineListEvidenceInput { fileName: string; rows: LineListRow[]; warnings?: string[] }
 export interface SimulatedAlarmEvidence { tag: string; name: string; unit: string; severity: string; description: string }
@@ -167,6 +170,167 @@ function resolvesTo(target: KnowledgeEquipment | DrawingAsset) {
   };
 }
 
+/**
+ * Instrument tags seen in a prompt, e.g. "LIC101204", "XV-101-223", "FIQ10602".
+ * Equipment aliases are handled by resolvePrompt; this is the DCS instrument
+ * corpus, which the alias index does not cover.
+ */
+export function instrumentTagsIn(prompt: string): string[] {
+  const found = prompt
+    .toUpperCase()
+    .match(/\b[A-Z]{1,4}(?:[-\s._]*\d{1,8})+[A-Z]?\b/g) ?? [];
+  return [...new Set(found.map((token) => token.replace(/[\s._-]+/g, "")))];
+}
+
+/** The instrument a prompt is asking about, if the corpus has it. */
+export function resolveInstrument(prompt: string, currentTag?: string | null): InstrumentEntry | null {
+  for (const candidate of instrumentTagsIn(prompt)) {
+    const entry = findInstrument(candidate);
+    if (entry) return entry;
+  }
+  if (currentTag) {
+    const fromContext = findInstrument(currentTag);
+    if (fromContext) return fromContext;
+  }
+  return null;
+}
+
+const SOURCE_LABEL: Record<string, { en: string; fr: string }> = {
+  isa: { en: "ISA tag decode", fr: "Décodage du tag ISA" },
+  dcs: { en: "DCS scan — image not re-verified", fr: "Relevé DCS — image non revérifiée" },
+  register: { en: "Equipment register", fr: "Registre des équipements" },
+  drawing: { en: "Drawing index (OCR) — not verified", fr: "Index de plan (OCR) — non vérifié" },
+};
+
+/**
+ * The instrument answer, built from exactly the same context the Instrument
+ * Finder shows — so the assistant can never say more than the UI does.
+ *
+ * Every claim is labelled with where it came from, the drawings are offered as
+ * unit-level leads (never as "this tag is on this sheet"), and the gaps are
+ * stated. Nothing here infers a line, a range, or a connection.
+ */
+export function buildInstrumentAnswer(entry: InstrumentEntry, lang: string): {
+  sections: string[];
+  sources: KnowledgeSource[];
+  coverage: string[];
+} {
+  // Narrow once: the instrument context is typed to the UI's language union.
+  const l: "en" | "fr" = fr(lang) ? "fr" : "en";
+  const context = instrumentContext(entry, l);
+  const sources: KnowledgeSource[] = [{
+    kind: "instrument",
+    id: entry.tag,
+    title: `${entry.tag} — ${describeInstrument(entry.parsed, l)}`,
+    href: `/instruments?q=${encodeURIComponent(entry.tag)}`,
+    detail: L(lang, "DCS instrument index", "Index d'instruments DCS"),
+  }];
+  const sections: string[] = [];
+  const coverage: string[] = [];
+
+  sections.push(L(lang,
+    `### Instrument \`${entry.tag}\`\n\n**${describeInstrument(entry.parsed, l)}** — decoded from the ISA tag. This decoding is a reading of the tag letters; it is not proof of the instrument's function.`,
+    `### Instrument \`${entry.tag}\`\n\n**${describeInstrument(entry.parsed, l)}** — décodé depuis le tag ISA. Ce décodage est une lecture des lettres du tag ; ce n'est pas une preuve de la fonction de l'instrument.`));
+
+  const unitLine = [
+    context.unitCode ? `unit \`${context.unitCode}\`` : null,
+    context.unitEn ? (fr(lang) ? context.unitFr : context.unitEn) : null,
+    entry.parsed.train ? `${L(lang, "train", "train")} ${entry.parsed.train}` : null,
+    entry.parsed.loop ? `${L(lang, "loop", "boucle")} ${entry.parsed.loop}` : null,
+  ].filter(Boolean).join(" · ");
+  if (unitLine) {
+    sections.push(L(lang,
+      `### Unit and train\n\n${unitLine}.\n\n${L(lang, "Source:", "Source :")} ${SOURCE_LABEL.isa.en}.`,
+      `### Unité et train\n\n${unitLine}.\n\n${L(lang, "Source:", "Source :")} ${SOURCE_LABEL.isa.fr}.`));
+  }
+
+  if (entry.panels.length) {
+    const panels = entry.panels.slice(0, 4).map((panel) => {
+      sources.push({
+        kind: "dcs", id: panel.id, title: fr(lang) ? panel.titleFr : panel.titleEn,
+        href: `/dcs/${encodeURIComponent(panel.id)}`,
+        detail: L(lang, "Pre-scanned DCS tags · image not re-verified", "Tags DCS pré-détectés · image non revérifiée"),
+      });
+      return `- ${fr(lang) ? panel.titleFr : panel.titleEn}`;
+    }).join("\n");
+    sections.push(L(lang,
+      `### Read on these DCS screens\n\n${panels}\n\n${SOURCE_LABEL.dcs.en}.`,
+      `### Lu sur ces écrans DCS\n\n${panels}\n\n${SOURCE_LABEL.dcs.fr}.`));
+  }
+
+  /* Drawings: a lead, never a location. */
+  if (context.placements.length) {
+    const rows = context.placements.slice(0, 4).map((placement) => {
+      const title = (fr(lang) ? placement.titleFr : placement.titleEn) ?? placement.title;
+      sources.push({
+        kind: "pid",
+        id: placement.file,
+        title: placement.drawing ? `${placement.drawing} — ${title}` : title,
+        href: placement.url,
+        detail: L(lang,
+          `Covers unit ${placement.matchedUnit ?? "?"} · not verified`,
+          `Couvre l'unité ${placement.matchedUnit ?? "?"} · non vérifié`),
+      });
+      const reason = placement.matchedByUnitDrawing
+        ? L(lang, `numbered for unit ${placement.unit}`, `numéroté pour l'unité ${placement.unit}`)
+        : L(lang, "no drawing number on the title block; listed because it shows this unit's equipment", "pas de numéro sur le cartouche ; listé car il montre des équipements de cette unité");
+      return `- **${placement.drawing ?? title}** — ${title} → [${L(lang, "open drawing", "ouvrir le plan")}](${placement.url})\n  - ${reason}`;
+    }).join("\n");
+    sections.push(L(lang,
+      `### Drawings to inspect\n\n${rows}\n\n**Unit-level association — not a verified location.** These drawings cover unit ${context.unitCode ?? "?"}. No drawing in this system has been shown to carry \`${entry.tag}\` as text, so I cannot tell you which sheet the instrument is on: open the drawings above and look for loop ${entry.parsed.loop ?? "?"}.`,
+      `### Plans à consulter\n\n${rows}\n\n**Association au niveau de l'unité — ce n'est pas une localisation vérifiée.** Ces plans couvrent l'unité ${context.unitCode ?? "?"}. Aucun plan de ce système ne porte \`${entry.tag}\` en texte : je ne peux donc pas dire sur quelle feuille se trouve l'instrument. Ouvrez les plans ci-dessus et cherchez la boucle ${entry.parsed.loop ?? "?"}.`));
+  } else {
+    sections.push(L(lang,
+      `### Drawings\n\n${context.missing[0] ?? "No drawing could be tied to this tag."}`,
+      `### Plans\n\n${context.missing[0] ?? "Aucun plan n'a pu être relié à ce tag."}`));
+  }
+
+  /* What is around it, labelled by source. */
+  if (context.equipmentOnDrawings.length || context.lines.length) {
+    const parts: string[] = [];
+    if (context.equipmentOnDrawings.length) {
+      const items = context.equipmentOnDrawings.slice(0, 8).map((item) =>
+        item.inRegister
+          ? `\`${item.tag}\` (${L(lang, "in the equipment register", "dans le registre des équipements")})`
+          : `\`${item.tag}\` (${L(lang, "read on the drawing, not in the register", "lu sur le plan, absent du registre")})`,
+      ).join(", ");
+      parts.push(L(lang, `**Equipment shown on those drawings:** ${items}`, `**Équipements figurant sur ces plans :** ${items}`));
+    }
+    if (context.lines.length) {
+      const calls = context.lines.slice(0, 8).map((line) => `\`${line.asRead}\``).join(", ");
+      parts.push(L(lang,
+        `**Piping carried by those drawings:** ${calls} — ${L(lang, "read by OCR, and not a connection of this instrument.", "lu par OCR, et non un raccordement de cet instrument.")}`,
+        `**Tuyauteries portées par ces plans :** ${calls} — ${L(lang, "read by OCR, and not a connection of this instrument.", "lu par OCR, et non un raccordement de cet instrument.")}`));
+    }
+    sections.push(L(lang, `### Around it on those drawings\n\n${parts.join("\n\n")}`, `### Autour de lui sur ces plans\n\n${parts.join("\n\n")}`));
+  }
+
+  /* Specifications, each with its source. */
+  if (context.specs.length) {
+    const rows = context.specs.slice(0, 10).map((spec) => {
+      const label = fr(lang) ? spec.labelFr : spec.labelEn;
+      const source = SOURCE_LABEL[spec.source]?.[fr(lang) ? "fr" : "en"] ?? spec.source;
+      return `- **${label}:** ${spec.value} — _${source}_${spec.verified ? ` (${L(lang, "verified", "vérifié")})` : ""}`;
+    }).join("\n");
+    sections.push(L(lang, `### Specifications\n\n${rows}`, `### Caractéristiques\n\n${rows}`));
+  }
+
+  /* The gaps. */
+  sections.push(L(lang,
+    `### What I cannot tell you\n\n${context.missing.map((item) => `- ${item}`).join("\n")}`,
+    `### Ce que je ne peux pas vous dire\n\n${context.missing.map((item) => `- ${item}`).join("\n")}`));
+
+  sections.push(L(lang,
+    `### Links\n\n- [Instrument Finder](${`/instruments?q=${encodeURIComponent(entry.tag)}`})\n- [P&ID library](/pids)`,
+    `### Liens\n\n- [Recherche d'instruments](${`/instruments?q=${encodeURIComponent(entry.tag)}`})\n- [Bibliothèque P&ID](/pids)`));
+
+  coverage.push(L(lang,
+    `Instrument decoded from the DCS tag index; drawings from the P&ID index (${pidCoverage().indexed}/${pidCoverage().sheets} sheets, ${pidCoverage().backend}), none of which has been signed off by an engineer.`,
+    `Instrument décodé depuis l'index de tags DCS ; plans issus de l'index P&ID (${pidCoverage().indexed}/${pidCoverage().sheets} feuilles, ${pidCoverage().backend}), dont aucune n'a été validée par un ingénieur.`));
+
+  return { sections, sources: sources.slice(0, 10), coverage };
+}
+
 export function buildKnowledgeAnswer(options: {
   prompt: string;
   lang: string;
@@ -187,6 +351,29 @@ export function buildKnowledgeAnswer(options: {
     const candidates = resolution.candidates.slice(0, 6).map((match) => `- \`${match.record.tag}\`${match.record.name ? ` — ${match.record.name}` : ""}`).join("\n");
     sections.push(L(lang, `### Which equipment do you mean?\n\nThe tag is ambiguous. Please choose one:\n${candidates}`, `### Quel équipement voulez-vous dire ?\n\nLe repère est ambigu. Veuillez choisir :\n${candidates}`));
     return { text: sections.join("\n\n"), sources, intent, resolution, verifiedLineList, coverage };
+  }
+
+  // A DCS instrument tag is answered from the instrument index: the alias index
+  // only covers equipment and drawing assets, so it would report "not found".
+  const instrument = resolveInstrument(prompt, currentTag);
+  if (instrument) {
+    const answer = buildInstrumentAnswer(instrument, lang);
+    answer.sections.push(L(lang,
+      "### Boundaries\n\nThis is a reference answer built from the DCS tag index and the P&ID index. It is advisory only: it is not an operating instruction, a work permit, or an approved engineering decision. Nothing here states where the instrument sits on a sheet, and nothing here is a verified process connection.",
+      "### Limites\n\nCeci est une réponse de référence construite à partir de l'index de tags DCS et de l'index P&ID. Elle est donnée à titre indicatif : ce n'est ni une consigne d'exploitation, ni une autorisation de travail, ni une décision d'ingénierie approuvée. Rien n'indique ici où se trouve l'instrument sur une feuille, et rien ne constitue un raccordement process vérifié."));
+    if (answer.coverage.length) {
+      answer.sections.push(L(lang,
+        `### Source coverage\n\n${[...new Set(answer.coverage)].map((item) => `- ${item}`).join("\n")}`,
+        `### Couverture des sources\n\n${[...new Set(answer.coverage)].map((item) => `- ${item}`).join("\n")}`));
+    }
+    return {
+      text: answer.sections.join("\n\n"),
+      sources: answer.sources,
+      intent: "instrument" as QuestionIntent,
+      resolution,
+      verifiedLineList: false,
+      coverage: answer.coverage,
+    };
   }
 
   const record = resolution.status === "resolved" ? resolution.matches[0].record : null;
