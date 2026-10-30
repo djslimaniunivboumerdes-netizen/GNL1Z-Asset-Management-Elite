@@ -8,14 +8,32 @@ describe("source-backed assistant answers", () => {
     expect(detectIntent("Combien de lignes de tuyauterie pour E-520 ?")).toBe("line_count");
   });
 
-  it("refuses to invent a pipeline count for E520 without a line list", () => {
-    const answer = buildKnowledgeAnswer({ prompt: "How many pipelines associated with E-520?", lang: "en" });
-    expect(answer.intent).toBe("line_count");
+  it("reads pipe sizes off the indexed drawing for E-520, and flags them as unverified", () => {
+    const answer = buildKnowledgeAnswer({ prompt: "What pipe sizes are connected to E-520?", lang: "en" });
+    expect(answer.intent).toBe("line_sizes");
     expect(answer.verifiedLineList).toBe(false);
-    expect(answer.text).toContain("Piping answer not yet verified");
+    expect(answer.text).toContain("Pipe sizes read on the P&ID");
     expect(answer.text).toContain("E520");
-    expect(answer.sources.some((source) => source.kind === "pid")).toBe(true);
+    // The drawing it was read from is cited, so the operator can check it.
+    expect(answer.sources.some((source) => source.kind === "pid" && source.href === "/pids/E520 R792 R793.pdf")).toBe(true);
+    // It names the drawing number and at least one standard size.
+    expect(answer.text).toContain("85-X06-10.1");
+    expect(answer.text).toMatch(/\d+"/);
+    // And it never claims the OCR reading is a verified value.
+    expect(answer.text).toContain("no engineer has signed them off");
     expect(answer.text).not.toMatch(/\b\d+\s+distinct pipeline/i);
+  });
+
+  it("answers the same question in French", () => {
+    const answer = buildKnowledgeAnswer({ prompt: "Quels diamètres sont raccordés à E-520 ?", lang: "fr" });
+    expect(answer.text).toContain("Diamètres lus sur le P&ID");
+    expect(answer.text).toContain("non vérifié");
+  });
+
+  it("still refuses to invent sizes for a tag that is on no drawing", () => {
+    const answer = buildKnowledgeAnswer({ prompt: "What pipe sizes are connected to X02-P-03.12B?", lang: "en" });
+    expect(answer.text).toContain("Piping answer not yet verified");
+    expect(answer.text).not.toMatch(/\b\d+"/);
   });
 
   it("counts and lists sizes from a supplied line list with row citations", () => {

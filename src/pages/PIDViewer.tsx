@@ -1,5 +1,7 @@
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useI18n } from "@/contexts/I18nContext";
+import { pidSheetByFile } from "@/lib/pidIndex";
 import { X, ZoomIn, ExternalLink, Search, Filter, ChevronRight, FileImage, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -368,6 +370,16 @@ export default function PIDViewer() {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<PIDSheet | null>(null);
   const [imgLoaded, setImgLoaded] = useState<Record<string, boolean>>({});
+  const [params] = useSearchParams();
+
+  // A link such as /pids?file=/pids/E520%20R792%20R793.pdf (from the assistant or
+  // an equipment record) opens that drawing directly.
+  const requestedFile = params.get("file");
+  useEffect(() => {
+    if (!requestedFile) return;
+    const match = PID_SHEETS.find((sheet) => SHEET_FILES[sheet.id] === requestedFile);
+    if (match) setSelected(match);
+  }, [requestedFile]);
 
   const filtered = useMemo(() => {
     let list = PID_SHEETS;
@@ -396,6 +408,7 @@ export default function PIDViewer() {
 
   const T = (en: string, fr: string) => (lang === "fr" ? fr : en);
   const selectedLocal = selected ? SHEET_FILES[selected.id] ?? null : null;
+  const selectedIndex = selectedLocal ? pidSheetByFile(selectedLocal) : null;
 
   return (
     <div className="min-h-screen bg-background">
@@ -716,6 +729,33 @@ export default function PIDViewer() {
                 </a>
               </div>
             </div>
+
+            {selectedIndex && (selectedIndex.sizes.length > 0 || selectedIndex.lineCalls.length > 0) && (
+              <div className="px-4 py-3 border-b border-border bg-secondary/30" data-testid="pid-sheet-index">
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+                    {T("Read from this drawing", "Lu sur ce plan")}
+                  </span>
+                  <Badge variant="outline" className={`font-mono text-[10px] ${selectedIndex.verified ? "border-emerald-500/40 text-emerald-700 dark:text-emerald-400" : "border-amber-500/40 text-amber-700 dark:text-amber-400"}`}>
+                    {selectedIndex.verified ? T("reviewed", "relu") : T("OCR · not verified", "OCR · non vérifié")}
+                  </Badge>
+                </div>
+                {selectedIndex.sizes.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-1.5">
+                    <span className="text-[10px] font-mono text-muted-foreground self-center mr-1">{T("Sizes", "Diamètres")}:</span>
+                    {selectedIndex.sizes.slice(0, 16).map((size) => (
+                      <span key={size} className="rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 font-mono text-[11px] text-cyan-700 dark:text-cyan-400">{size}</span>
+                    ))}
+                  </div>
+                )}
+                {selectedIndex.lineCalls.length > 0 && (
+                  <div className="font-mono text-[10px] text-foreground/70 break-words">
+                    <span className="text-muted-foreground mr-1">{T("Callouts", "Repères")}:</span>
+                    {selectedIndex.lineCalls.slice(0, 10).map((call) => call.asRead).join(" · ")}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* iframe preview */}
             <div className="flex-1 relative bg-[hsl(220_25%_4%)]">

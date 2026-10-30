@@ -141,14 +141,18 @@ describe("bounded assistant endpoint", () => {
     expect(data.providerFallback).toBe(true);
     expect(data.response).toContain("X01-E-501");
   });
-  it("returns a coverage gap, not an invented count, for E520 pipeline questions", async () => {
+  it("answers an E520 pipeline question from the drawing index, without claiming a verified count", async () => {
     const response = await onRequestPost({ request: request({ prompt: "How many pipelines associated with E-520?" }), env: {} });
     const data = await response.json();
     expect(response.status).toBe(200);
+    // Deterministic: the indexed drawing answers it, no provider call needed.
     expect(data.mode).toBe("reference");
     expect(data.verifiedLineList).toBe(false);
-    expect(data.response).toContain("Piping answer not yet verified");
-    expect(data.sources.some((source: { kind: string }) => source.kind === "pid")).toBe(true);
+    expect(data.response).toContain("Pipe sizes read on the P&ID");
+    expect(data.response).toContain("no engineer has signed them off");
+    expect(data.sources.some((source: { kind: string; href?: string }) => source.kind === "pid" && source.href === "/pids/E520 R792 R793.pdf")).toBe(true);
+    // Still no invented pipeline count.
+    expect(data.response).not.toMatch(/\b\d+\s+distinct pipeline/i);
   });
   it("answers line-size questions from supplied CSV rows even when a provider key exists", async () => {
     const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
