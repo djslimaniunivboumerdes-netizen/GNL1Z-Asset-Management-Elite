@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 // src/data/dcs_panels.ts
 
 export interface DCSPanel {
@@ -17,7 +18,11 @@ export interface DCSPanel {
   related_tags?: string[];     // explicit equipment tags
 }
 
-const STORAGE_PROJECT = import.meta.env.VITE_SUPABASE_URL || "https://gdkqetzkhgllwbpmqmux.supabase.co";
+// Read defensively: this module is also reached from vite.config.ts (through the
+// Cloudflare Functions the dev server bridges), where `import.meta.env` is not
+// defined. Vite still replaces it in the app build.
+const STORAGE_PROJECT =
+  import.meta.env?.VITE_SUPABASE_URL || "https://gdkqetzkhgllwbpmqmux.supabase.co";
 const SB = `${STORAGE_PROJECT}/storage/v1/object/public/equipment-images`;
 
 // Helper to build a public Supabase URL from a storage path

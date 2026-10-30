@@ -84,6 +84,54 @@ What this does **not** do, and why:
   register rows are marked verified. The panel ends with the unavailable fields
   (calibrated range, span, model, datasheet) rather than leaving them blank.
 
+## What each word means here
+
+These four words are used consistently in the UI, in the assistant answers and
+in the documentation. They are not interchangeable.
+
+| Word | Meaning | What it is based on |
+|---|---|---|
+| **Verified** | Confirmed by an approved register record or by a qualified human review with traceable evidence | `public.engineering_documents` / the equipment register; a named verifier and date |
+| **Unit-level association** | The drawing belongs to the instrument's unit; the presence of the tag on it has *not* been established | the unit code in the tag, and the drawing number or the equipment shown on the sheet |
+| **OCR-derived** | Text extracted from a scanned drawing, not independently verified | `src/data/pid_index.json`, backend `ocr-rapidocr` |
+| **Unavailable** | The source data does not support a reliable answer | stated explicitly, never guessed |
+
+Nothing becomes verified because a tag and a drawing share a unit number. No
+sheet in this corpus carries a revision, and no sheet has been signed off, so
+every drawing-derived value today is **OCR-derived**.
+
+## Instrument → P&ID association rules
+
+1. A tag is placed in a unit by its numbering: `LIC101204` → unit code `101` →
+   unit `01`. Train and loop come from the same tag and are reported with it.
+2. The drawings of that unit are the candidates, found two ways: the drawing
+   number (`85-X01-…`) or, when the title block has no readable number, the
+   equipment the sheet shows (`X01-G-507`).
+3. A sheet that is numbered for another unit but shows equipment of this
+   instrument's unit is listed **with the equipment that justifies it**.
+4. No association is made from a number, a loop, or any substring. Changing the
+   loop digits of a tag does not change its drawings — there is a test for it.
+5. Lines are reported as what the drawing carries. No line is ever presented as
+   the instrument's process connection.
+6. Where the source has nothing to say, the answer says so: exact position,
+   tapped line, revision, train, calibrated range, model, datasheet.
+
+## Expert AI GNL1 and instrument questions
+
+An instrument question is answered from `instrumentContext()` — the same object
+the Instrument Finder renders — so the assistant cannot say more than the UI
+does. The answer is deterministic: the endpoint never calls the language model
+for this intent, so the rules do not depend on the model behaving itself.
+
+Each answer carries the identity, unit and train, the drawings as a unit-level
+lead with links into the P&ID viewer, the equipment and piping around them
+labelled register / drawing-only, every specification with its source, the gaps,
+and a boundary note that it is advisory and not an approved engineering
+decision. Every claim cites the drawing, screen or register row it came from.
+The assistant never exposes a signed URL, a storage path or a credential: it
+links to `/instruments?q=…` and `/pids?file=…`, which enforce the existing
+document permissions.
+
 ## Instrument register fields
 
 | Field | Source | Verified |

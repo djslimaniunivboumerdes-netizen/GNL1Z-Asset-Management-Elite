@@ -171,3 +171,37 @@ describe("bounded assistant endpoint", () => {
     expect(data.response).toContain('3"');
   });
 });
+
+describe("instrument questions at the endpoint", () => {
+  it("never lets a provider narrate an instrument answer", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "invented" }] } }] }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await onRequestPost({
+      request: request({ prompt: "where is LIC101204?", contextData: context }),
+      env: { GEMINI_API_KEY: "test-key", GEMINI_MODEL: "test-model" },
+    });
+    const data = await response.json();
+    // The answer is built from the index, so no provider is called at all.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(data.intent).toBe("instrument");
+    expect(data.mode).toBe("reference");
+    expect(data.response).toContain("LIC101204");
+    expect(data.response).toMatch(/Unit-level association/);
+    expect(data.response).not.toContain("invented");
+    expect(JSON.stringify(data)).not.toContain("do-not-send");
+    expect(JSON.stringify(data)).not.toContain("test-key");
+  });
+
+  it("does not send a signed URL or a document path back to the caller", async () => {
+    const response = await onRequestPost({
+      request: request({ prompt: "where is LIC101204?", contextData: context }),
+      env: {},
+    });
+    const data = await response.json();
+    const payload = JSON.stringify(data);
+    expect(payload).not.toMatch(/token=|signature=|service_role|sb_secret/i);
+    for (const source of data.sources) {
+      expect(String(source.href ?? "")).toMatch(/^\//);
+    }
+  });
+});

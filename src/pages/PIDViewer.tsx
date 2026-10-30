@@ -2,7 +2,9 @@ import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useI18n } from "@/contexts/I18nContext";
 import { pidSheetByFile } from "@/lib/pidIndex";
-import { instrumentCountForUnit, unitOfSheet } from "@/lib/instrumentLocation";
+import {
+  instrumentCountForUnit, provenanceGaps, sheetProvenance, shortChecksum, unitOfSheet,
+} from "@/lib/instrumentLocation";
 import { X, ZoomIn, ExternalLink, Search, Filter, ChevronRight, FileImage, FileText, Gauge, ArrowUpRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -416,6 +418,7 @@ export default function PIDViewer() {
   // belong to the same unit — the way back from a drawing to the instrument list.
   const sheetUnit = selectedLocal ? unitOfSheet(selectedLocal) : null;
   const unitInstrumentCount = useMemo(() => instrumentCountForUnit(sheetUnit), [sheetUnit]);
+  const provenance = useMemo(() => sheetProvenance(selectedLocal), [selectedLocal]);
   // Once the drawings have been migrated to the private bucket the static path
   // no longer resolves; the register turns it into a signed URL, or says why it
   // cannot be opened instead of showing a blank frame.
@@ -699,6 +702,52 @@ export default function PIDViewer() {
                   {T("Drawing No.", "N° Plan")}
                 </div>
                 <div className="text-foreground font-mono text-xs">{selected.drawing}</div>
+                {provenance && (
+                  <dl className="mt-2 space-y-1 text-[10px] font-mono" data-testid="pid-provenance">
+                    <Row label={T("Drawing", "Plan")}>
+                      {provenance.drawing ?? <span className="text-amber-500/90">{T("not recorded", "non indiqué")}</span>}
+                    </Row>
+                    <Row label={T("Revision", "Révision")}>
+                      {provenance.revision ? (
+                        provenance.revision
+                      ) : (
+                        <span className="text-amber-500/90">{T("Revision not recorded", "Révision non enregistrée")}</span>
+                      )}
+                    </Row>
+                    <Row label={T("Unit / train", "Unité / train")}>
+                      {provenance.unit ?? "—"}
+                      <span className="text-muted-foreground">
+                        {" / "}
+                        {provenance.train ?? T("not recorded", "non indiqué")}
+                      </span>
+                    </Row>
+                    <Row label={T("Source file", "Fichier source")}>
+                      <span className="break-all">{provenance.file}</span>
+                    </Row>
+                    <Row label={T("Checksum", "Empreinte")}>
+                      <span title={provenance.sha256 ?? ""}>{shortChecksum(provenance.sha256) ?? "—"}</span>
+                    </Row>
+                    <Row label={T("Extraction", "Extraction")}>
+                      {[provenance.extractionMethod, provenance.extractedAt?.slice(0, 10)].filter(Boolean).join(" · ") || "—"}
+                    </Row>
+                    <Row label={T("Verification", "Vérification")}>
+                      {provenance.verified ? (
+                        <span className="text-emerald-400">{T("verified", "vérifié")}</span>
+                      ) : (
+                        <span className="text-amber-500/90">{T("Not verified", "Non vérifié")}</span>
+                      )}
+                      <span className="text-muted-foreground">
+                        {" · "}
+                        {provenance.verifiedBy ?? T("no verifier recorded", "vérificateur non enregistré")}
+                      </span>
+                    </Row>
+                    {provenanceGaps(provenance, lang).length > 0 && (
+                      <p className="text-[10px] text-muted-foreground pt-1 leading-snug">
+                        {provenanceGaps(provenance, lang).join(" · ")}
+                      </p>
+                    )}
+                  </dl>
+                )}
               </div>
 
               <div>
@@ -821,3 +870,13 @@ export default function PIDViewer() {
     </div>
   );
       }
+
+/** One provenance line: label on the left, value on the right. */
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex gap-2">
+      <dt className="text-muted-foreground w-24 shrink-0">{label}</dt>
+      <dd className="text-foreground/80 min-w-0">{children}</dd>
+    </div>
+  );
+}

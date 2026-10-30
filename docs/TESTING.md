@@ -15,10 +15,10 @@ node scripts/audit-documents.mjs    # static document exposure report (read-only
 
 | Metric | Value |
 |---|---|
-| Test files | 39 |
-| Tests | 326 |
+| Test files | 44 |
+| Tests | 377 |
 | Typecheck | clean (`tsc -b`) |
-| Lint | clean |
+| Lint | clean (0 errors, 7 pre-existing warnings) |
 | Build | PWA with 111 precache entries |
 
 ## What is covered
@@ -30,6 +30,10 @@ node scripts/audit-documents.mjs    # static document exposure report (read-only
 | Unit conversion | `units.test.ts` |
 | ISA instrument tag interpretation | `instrumentTags.test.ts` |
 | Instrument ↔ drawing placement, provenance of every specification, stated gaps | `instrumentLocation.test.ts` |
+| The eight instrument traceability cases and the rules that must never break | `instrumentTraceability.test.ts` |
+| Drawing provenance from both the instrument and the P&ID viewer | `drawingProvenance.test.tsx` |
+| Assistant instrument answers: sources, gaps, no exact-sheet claim, no leak | `assistantInstrument.test.ts`, `aiAgentEndpoint.test.ts` |
+| Classification parity between the migration script and the app | `documentClassParity.test.ts` |
 | Equipment register integrity | `equipmentData.test.ts` |
 | Reliability KPIs (MTBF/MTTR/availability) | `reliability.test.ts` |
 | Assistant knowledge, citations, verified/unverified split | `assistantKnowledge.test.ts`, `aiAgentEndpoint.test.ts` |
@@ -201,9 +205,24 @@ created on staging only, `mailer_autoconfirm` is on there so no mailbox is
 needed. Set a password in the dashboard (Authentication → Users → … → Reset /
 send password) or create your own; role is on `public.profiles.role_key`.
 
-To delete them when you are finished:
+**These were removed on 2026-10-30** together with the two `maintenance_logs`
+and two `engineering_documents` fixtures they had created. Staging currently
+holds 0 users. Recreate them with the SQL in
+`supabase/migrations/20261030000003_two_tier_access_model.sql` (the seed
+block), or insert by hand, then re-run the probes. The `audit_log` was kept —
+do not truncate it to "clean up"; it is the evidence the probes happened.
 
-```sql
-delete from public.profiles where email like '%.staging@gnl1z.test';
-delete from auth.users       where email like '%.staging@gnl1z.test';
-```
+Manual staging run for the instrument work (no browser automation available):
+
+1. Start the preview (`npx vite --host 0.0.0.0 --port 8081`).
+2. Open `/instruments?q=LIC101204` → the card lists `85-X01-…` chips; press
+   **Locate** → drawings, equipment, piping, specifications with sources, and
+   the three gaps.
+3. Open `/instruments?unit=06` → 81 instruments across trains 1/2/3/5/6, every
+   chip a unit-06 drawing.
+4. Toggle **Has a drawing** → the count drops by exactly 31.
+5. Open a drawing from `/pids?file=…` → the provenance block (revision "not
+   recorded", checksum, extraction, verification) and the "instruments of unit
+   NN" link, which returns to step 3.
+6. Ask Expert AI "where is LIC101204?" → a reference-mode answer that offers
+   the drawings as a unit-level lead and states what it cannot tell you.

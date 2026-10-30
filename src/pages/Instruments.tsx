@@ -12,7 +12,7 @@ import {
   type InstrumentEntry,
 } from "@/lib/instrumentIndex";
 import { describeInstrument, instrumentUnit } from "@/lib/instrumentTags";
-import { instrumentContext, unitOfInstrument } from "@/lib/instrumentLocation";
+import { instrumentContext, placementGroups, unitOfInstrument } from "@/lib/instrumentLocation";
 import InstrumentLocator from "@/components/InstrumentLocator";
 
 const L = (lang: "en" | "fr", en: string, fr: string) => (lang === "fr" ? fr : en);
@@ -48,7 +48,9 @@ function InstrumentCard({
 }) {
   const { parsed, unit, panels, equipment } = entry;
   const eu = instrumentUnit(parsed);
-  const drawings = instrumentContext(entry, lang).placements;
+  // Several files can carry the same drawing number: one chip each, or the same
+  // number would be listed twice and one of the files would never be opened.
+  const drawings = placementGroups(instrumentContext(entry, lang).placements);
 
   return (
     <article
@@ -78,25 +80,14 @@ function InstrumentCard({
         </div>
       </div>
 
-      {/* Where it is */}
-      <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono text-muted-foreground">
-        {unit && (
-          <span className="inline-flex items-center gap-1 border border-border rounded-md px-2 py-1">
-            <Layers className="h-3 w-3" />
-            {unit.code} · {L(lang, unit.en, unit.fr)}
-          </span>
-        )}
-        {parsed.train && (
-          <span className="inline-flex items-center gap-1 border border-border rounded-md px-2 py-1">
-            <CircleDot className="h-3 w-3" />
-            {L(lang, "Train", "Train")} {parsed.train}
-          </span>
-        )}
-        {parsed.loop && (
-          <span className="inline-flex items-center gap-1 border border-border rounded-md px-2 py-1">
-            {L(lang, "Loop", "Boucle")} {parsed.loop}
-          </span>
-        )}
+      {/* Where it is — one line, not three badges. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] font-mono text-muted-foreground">
+        <span className="inline-flex items-center gap-1.5">
+          <Layers className="h-3 w-3" />
+          {unit ? `${unit.code} · ${L(lang, unit.en, unit.fr)}` : L(lang, "Unit not read", "Unité non lue")}
+          {parsed.train ? ` · ${L(lang, "train", "train")} ${parsed.train}` : ""}
+          {parsed.loop ? ` · ${L(lang, "loop", "boucle")} ${parsed.loop}` : ""}
+        </span>
         <button
           type="button"
           onClick={() => onLocate(entry)}
@@ -115,18 +106,21 @@ function InstrumentCard({
             <FileText className="h-3 w-3" />
             {L(lang, "On the drawings", "Sur les plans")}
             <span className="text-amber-500/80 normal-case tracking-normal">
-              · {L(lang, "unit-level, not verified", "niveau unité, non vérifié")}
+              · {L(lang, "unit-level", "niveau unité")}
             </span>
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {drawings.slice(0, 3).map((placement) => (
+            {drawings.slice(0, 3).map((group) => (
               <Link
-                key={placement.file}
-                to={placement.url}
-                title={placement.title}
+                key={group.label}
+                to={group.placements[0].url}
+                title={group.placements.map((placement) => placement.title).join(" · ")}
                 className="inline-flex items-center gap-1 text-[11px] font-mono border border-border text-foreground/80 hover:border-cyan-500/40 hover:text-cyan-400 rounded-md px-2 py-1 transition-colors"
               >
-                {placement.drawing ?? placement.title}
+                {group.label}
+                {group.placements.length > 1 && (
+                  <span className="text-muted-foreground">×{group.placements.length}</span>
+                )}
                 <ArrowUpRight className="h-3 w-3" />
               </Link>
             ))}
